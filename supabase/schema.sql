@@ -60,6 +60,19 @@ begin
   return new;
 end $$;
 
+-- Staff accounts must be switched on by an admin before they can do
+-- anything, so there's no need for an email confirmation step as well.
+-- This also means sign-up works before the Site URL is configured.
+create or replace function public.auto_confirm_email() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  new.email_confirmed_at := coalesce(new.email_confirmed_at, now());
+  return new;
+end $$;
+drop trigger if exists auto_confirm_email on auth.users;
+create trigger auto_confirm_email before insert on auth.users
+  for each row execute function public.auto_confirm_email();
+
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();

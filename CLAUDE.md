@@ -8,7 +8,13 @@ See README.md for features and setup.
 - Code complete and tested end-to-end (local PostgREST harness, 20 browser checks).
 - Live on Vercel: https://chai-green-stock.vercel.app (project `chai-green-stock`,
   team `harperanddad-s-projects`, auto-deploys on push to `main`).
-- NOT YET CONNECTED to a database: `js/config.js` still has placeholders.
+- Connected to Supabase project `bysgrggktdjmwffupfjp` (London) in the user's
+  separate Chai Green Supabase account (not reachable via the Supabase connector,
+  which is signed in to the Wizardtec account). Schema loaded 13 Oct 2026.
+- To re-run supabase/schema.sql after changes: Vercel sandbox (private, temporary)
+  connecting to aws-0-eu-west-2.pooler.supabase.com:5432 as postgres.<ref>
+  with the database password (ask the user; never commit it). This sandbox can't
+  reach Supabase or vercel.app directly.
 
 ## To finish setup (when the Supabase connector points at the Chai Green account)
 1. `list_organizations` → pick the Chai Green org (NOT Wizardtec).

@@ -13,6 +13,8 @@ See README.md for features and setup.
   which is signed in to the Wizardtec account). Schema loaded 13 Oct 2026.
 - To re-run supabase/schema.sql after changes: Vercel sandbox (private, temporary)
   connecting to aws-0-eu-west-2.pooler.supabase.com:5432 as postgres.<ref>
+  (181 products + September stock-take quantities imported from the user's
+  spreadsheet on 13 Oct 2026; prices are NOT kept in this public repo)
   with the database password (ask the user; never commit it). This sandbox can't
   reach Supabase or vercel.app directly.
 

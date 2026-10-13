@@ -1,0 +1,24 @@
+{
+  "crons": [
+    { "path": "/api/daily-alerts", "schedule": "0 7 * * *" }
+  ],
+  "redirects": [
+    { "source": "/supabase/:path*", "destination": "/", "permanent": false },
+    { "source": "/README.md", "destination": "/", "permanent": false }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "same-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(self), microphone=(), geolocation=()" }
+      ]
+    },
+    {
+      "source": "/(js|css)/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    }
+  ]
+}

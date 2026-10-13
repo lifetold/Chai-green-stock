@@ -39,7 +39,7 @@ export async function render(main, params) {
     ${isNew ? '' : html`<div class="card"><h2>Prices</h2><div class="price-grid">
       <div><div class="k">Cost (ex VAT)</div><div class="v">${money(p.cost_price)}</div></div>
       <div><div class="k">Company-owned stores</div><div class="v">${money(p.cost_price)}</div><small>cost, no margin</small></div>
-      <div><div class="k">Franchise stores</div><div class="v">${money(p.franchise_price)}</div><small>cost + ${num(p.eff_margin_pct)}%${p.margin_pct == null ? ' (default)' : ''}</small></div>
+      <div><div class="k">Franchise stores</div><div class="v">${money(p.franchise_price)}</div><small>${Number(p.sell_price) > 0 ? 'selling price' : 'cost + ' + num(p.eff_margin_pct) + '%' + (p.margin_pct == null ? ' (default)' : '')}</small></div>
       <div><div class="k">VAT</div><div class="v">${num(p.eff_vat_rate)}%</div></div>
     </div>
     ${stores.some(s => s.type === 'franchise' && s.margin_pct != null) ? html`<p class="muted" style="margin-top:.75rem">Stores with their own agreed margin:
@@ -63,7 +63,8 @@ export async function render(main, params) {
       <h3>Pricing</h3>
       <div class="grid three">
         ${field('cost_price', 'Cost price £', 'type="number" step="0.0001" min="0" inputmode="decimal"', 'per unit, ex VAT')}
-        ${field('margin_pct', 'Franchise margin %', `type="number" step="0.01" placeholder="default ${S.default_margin_pct}%"`)}
+        ${field('sell_price', 'Franchise selling price £', 'type="number" step="0.01" min="0" inputmode="decimal"', 'blank = cost + margin')}
+        ${field('margin_pct', 'Franchise margin %', `type="number" step="0.01" placeholder="default ${S.default_margin_pct}%"`, 'used if no selling price')}
         <label>VAT rate<select name="vat_rate" ${mgr ? '' : raw('disabled')}>
           <option value="">Default (${num(S.default_vat_rate)}%)</option>
           ${[['20', '20% standard'], ['5', '5% reduced'], ['0', '0% zero-rated']].map(([r, l]) => html`<option value="${r}" ${v.vat_rate != null && Number(v.vat_rate) === Number(r) ? 'selected' : ''}>${l}</option>`)}</select></label>
@@ -121,7 +122,7 @@ export async function render(main, params) {
     busy(form.querySelector('[type=submit]'), async () => {
       try {
         const f = formData(form);
-        for (const k of ['cost_price', 'margin_pct', 'vat_rate', 'lead_time_days', 'reorder_point', 'reorder_qty', 'min_stock']) {
+        for (const k of ['cost_price', 'sell_price', 'margin_pct', 'vat_rate', 'lead_time_days', 'reorder_point', 'reorder_qty', 'min_stock']) {
           f[k] = f[k] == null ? null : Number(f[k]);
         }
         f.cost_price = f.cost_price ?? 0;

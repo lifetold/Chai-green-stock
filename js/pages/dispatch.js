@@ -7,10 +7,12 @@ import { refreshCounts } from '../app.js';
 
 // Same rule as price_for() in the database (the database has the final say).
 export function priceFor(product, store, settings) {
-  if (!store) return { margin: 0, price: Number(product.cost_price) };
-  const margin = store.type === 'company' ? 0
-    : Number(store.margin_pct ?? product.margin_pct ?? settings.default_margin_pct);
-  return { margin, price: Math.round(Number(product.cost_price) * (1 + margin / 100) * 100) / 100 };
+  const cost = Number(product.cost_price);
+  const round = n => Math.round(n * 100) / 100;
+  if (!store || store.type === 'company') return { price: cost };
+  if (store.margin_pct != null) return { price: round(cost * (1 + Number(store.margin_pct) / 100)) };
+  if (Number(product.sell_price) > 0) return { price: Number(product.sell_price) };
+  return { price: round(cost * (1 + Number(product.margin_pct ?? settings.default_margin_pct) / 100)) };
 }
 
 export async function render(main, params) {
@@ -68,7 +70,7 @@ export async function render(main, params) {
     const s = store();
     $('[data-store-info]').innerHTML = s ? html`${badge(s.type)} ${s.type === 'company'
       ? 'Charged at cost, no margin.'
-      : (s.margin_pct != null ? `Charged at cost + ${num(s.margin_pct)}% (this store's agreed margin).` : 'Charged at cost + each product\'s franchise margin.')}
+      : (s.margin_pct != null ? `Charged at cost + ${num(s.margin_pct)}% (this store's agreed margin).` : 'Charged at each product\'s franchise selling price.')}
       ${s.email ? html` Invoice email: ${s.email}` : html` <b>No invoice email set for this store.</b>`}` : '';
   }
   showStore();

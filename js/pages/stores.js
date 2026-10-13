@@ -11,14 +11,14 @@ export async function render(main) {
   const mgr = isManager();
   main.innerHTML = html`
     <div class="page-head"><div><h1>Stores</h1>
-      <p class="muted">Company-owned stores are charged at cost. Franchise stores pay cost + margin: the store's agreed margin if it has one, otherwise each product's margin (default ${num(state.settings.default_margin_pct)}%).</p></div>
+      <p class="muted">Company-owned stores are charged at cost. Franchise stores pay each product's selling price, unless the store has its own agreed margin on cost.</p></div>
       ${mgr ? html`<button class="btn primary" data-new>+ Add store</button>` : ''}</div>
     <div class="card"><div class="table-wrap">${stores.length ? html`<table>
       <thead><tr><th>Store</th><th>Type</th><th class="num">Margin</th><th>Invoice email</th><th class="num">Owed</th><th></th></tr></thead>
       <tbody>${stores.map((s, i) => html`<tr ${s.active ? '' : html`style="opacity:.55"`}>
         <td><b>${s.name}</b>${s.code ? html` <small>${s.code}</small>` : ''}<br><small>${s.contact_name || ''} ${s.phone || ''}</small></td>
         <td>${badge(s.type)}</td>
-        <td class="num">${s.type === 'company' ? '0% (cost)' : s.margin_pct != null ? num(s.margin_pct) + '%' : 'per product'}</td>
+        <td class="num">${s.type === 'company' ? '0% (cost)' : s.margin_pct != null ? num(s.margin_pct) + '% on cost' : 'price list'}</td>
         <td>${s.email || html`<span class="badge warn">missing</span>`}</td>
         <td class="num">${owed[s.id] ? html`<a href="#/invoices?store=${s.id}&status=unpaid">${money(owed[s.id])}</a>` : '—'}</td>
         <td class="num"><div class="btn-row" style="justify-content:flex-end">
@@ -34,7 +34,7 @@ export async function render(main) {
         <label>Short code <span class="hint">(optional)</span><input name="code" value="${s.code || ''}"></label>
         <label>Type<select name="type"><option value="franchise" ${s.type === 'franchise' ? 'selected' : ''}>Franchise (cost + margin)</option>
           <option value="company" ${s.type === 'company' ? 'selected' : ''}>Company owned (cost, no margin)</option></select></label>
-        <label data-margin>Agreed margin % <span class="hint">(blank = each product's margin)</span><input name="margin_pct" type="number" step="0.01" value="${s.margin_pct ?? ''}"></label>
+        <label data-margin>Agreed margin on cost % <span class="hint">(blank = normal selling prices)</span><input name="margin_pct" type="number" step="0.01" value="${s.margin_pct ?? ''}"></label>
         <label>Contact name<input name="contact_name" value="${s.contact_name || ''}"></label>
         <label>Phone<input name="phone" type="tel" value="${s.phone || ''}"></label>
         <label>Invoice email<input name="email" type="email" value="${s.email || ''}"></label>

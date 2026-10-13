@@ -165,6 +165,10 @@ create table if not exists public.products (
   updated_at        timestamptz not null default now()
 );
 create index if not exists products_name_idx on public.products (lower(name));
+-- added later: a fixed franchise selling price (from the price list) and the
+-- order products appear in the full stock take (the stock-take sheet order)
+alter table public.products add column if not exists sell_price numeric(12,2);
+alter table public.products add column if not exists sort_order int;
 
 create table if not exists public.product_barcodes (
   barcode     text primary key,
@@ -344,7 +348,7 @@ create index if not exists stock_movements_created_idx on public.stock_movements
 -- ============================================================== stock checks
 create table if not exists public.stock_checks (
   id            uuid primary key default gen_random_uuid(),
-  week_start    date not null unique,
+  week_start    date not null,
   assigned_to   uuid references public.profiles(id),
   status        text not null default 'open' check (status in ('open','submitted','approved')),
   submitted_at  timestamptz,
@@ -354,6 +358,16 @@ create table if not exists public.stock_checks (
   notes         text,
   created_at    timestamptz not null default now()
 );
+
+-- 'weekly' = the rota check; 'full' = a count of every product (full stock take)
+alter table public.stock_checks add column if not exists kind text not null default 'weekly';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'stock_checks_kind_check') then
+    alter table public.stock_checks add constraint stock_checks_kind_check check (kind in ('weekly','full'));
+  end if;
+end $$;
+alter table public.stock_checks drop constraint if exists stock_checks_week_start_key;
+create unique index if not exists stock_checks_week_kind_idx on public.stock_checks (week_start, kind);
 
 create table if not exists public.stock_check_lines (
   id            uuid primary key default gen_random_uuid(),
@@ -456,7 +470,8 @@ create policy "staff upload photos" on storage.objects for insert to authenticat
 
 -- ============================================================== views
 -- Average daily usage, reorder point and status for every product.
-create or replace view public.product_stock
+drop view if exists public.product_stock;
+create view public.product_stock
 with (security_invoker = true) as
 with s as (select * from public.settings where id = 1),
 usage as (
@@ -486,7 +501,9 @@ base as (
     i.next_due,
     e.next_expiry,
     s.safety_stock_days,
-    coalesce(p.margin_pct, s.default_margin_pct) as eff_margin_pct,
+    case when p.sell_price > 0 and p.cost_price > 0
+         then round((p.sell_price / p.cost_price - 1) * 100, 2)
+         else coalesce(p.margin_pct, s.default_margin_pct) end as eff_margin_pct,
     coalesce(p.vat_rate, s.default_vat_rate) as eff_vat_rate
   from public.products p
   cross join s
@@ -505,7 +522,7 @@ calc as (
 select c.*,
   coalesce(c.reorder_qty,
     greatest(1, ceil(c.daily_usage * 28 + c.eff_reorder_point - c.qty_on_hand - c.on_order))) as eff_reorder_qty,
-  round(c.cost_price * (1 + c.eff_margin_pct / 100), 2) as franchise_price,
+  coalesce(nullif(c.sell_price, 0), round(c.cost_price * (1 + c.eff_margin_pct / 100), 2)) as franchise_price,
   case
     when not c.active then 'inactive'
     when c.qty_on_hand <= 0 then 'out'
@@ -619,20 +636,26 @@ revoke all on function public._add_photos from public, anon, authenticated;
 
 -- Price a product for a store.
 --   company-owned store → cost, no margin
---   franchise store     → cost + margin, where margin is the store's agreed
---                         margin if set, else the product's, else the default
+--   franchise store     → the store's agreed margin on cost, if it has one;
+--                         otherwise the product's selling price, if set;
+--                         otherwise cost + the product's margin (or the default)
 create or replace function public.price_for(p_product uuid, p_store uuid)
 returns table (unit_cost numeric, margin_pct numeric, unit_price numeric, vat_rate numeric)
 language sql stable security definer set search_path = public as $$
   select p.cost_price,
-         m.margin,
-         round(p.cost_price * (1 + m.margin / 100), 2),
+         case when pr.price is null or p.cost_price <= 0 then 0
+              else least(greatest(round((pr.price / p.cost_price - 1) * 100, 2), -999), 9999) end,
+         pr.price,
          coalesce(p.vat_rate, s.default_vat_rate)
   from public.products p
   cross join public.settings s
   cross join public.stores st
-  cross join lateral (select case when st.type = 'company' then 0
-                                  else coalesce(st.margin_pct, p.margin_pct, s.default_margin_pct) end as margin) m
+  cross join lateral (select case
+      when st.type = 'company' then p.cost_price
+      when st.margin_pct is not null then round(p.cost_price * (1 + st.margin_pct / 100), 2)
+      when p.sell_price > 0 then p.sell_price
+      else round(p.cost_price * (1 + coalesce(p.margin_pct, s.default_margin_pct) / 100), 2)
+    end as price) pr
   where p.id = p_product and st.id = p_store and s.id = 1 and public.is_staff()
 $$;
 
@@ -829,7 +852,7 @@ language sql stable security definer set search_path = public as $$
          case when c.id is not null then (select count(*) from public.stock_check_lines where check_id = c.id)
               else (select count(*) from public.products p where p.active and (p.check_every_week or p.check_group = public.check_group_for(w.wk))) end,
          c.id, coalesce(c.status, 'not started')
-  from w left join public.stock_checks c on c.week_start = w.wk
+  from w left join public.stock_checks c on c.week_start = w.wk and c.kind = 'weekly'
   where public.is_staff()
   order by w.wk
 $$;
@@ -843,7 +866,7 @@ declare v_week date; v_id uuid; v_group int;
 begin
   perform public.require_staff();
   v_week := public.check_week_start(p_date);
-  select id into v_id from public.stock_checks where week_start = v_week;
+  select id into v_id from public.stock_checks where week_start = v_week and kind = 'weekly';
   if v_id is not null then return v_id; end if;
 
   v_group := public.check_group_for(v_week);
@@ -925,6 +948,52 @@ begin
   update public.stock_checks set status = 'open', submitted_at = null, submitted_by = null
   where id = p_check and status = 'submitted';
   if not found then raise exception 'Only a submitted stock check can be reopened'; end if;
+end $$;
+
+-- ---------------------------------------------------------------- full stock take
+-- Count every active product, one by one, in stock-take sheet order.
+-- Returns the open full stock take, or starts a new one.
+create or replace function public.start_full_stock_take() returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid;
+begin
+  perform public.require_staff();
+  select id into v_id from public.stock_checks where kind = 'full' and status = 'open'
+  order by created_at desc limit 1;
+  if v_id is not null then return v_id; end if;
+  if exists (select 1 from public.stock_checks where kind = 'full' and week_start = current_date) then
+    raise exception 'A full stock take has already been done today';
+  end if;
+  insert into public.stock_checks (week_start, kind, assigned_to)
+  values (current_date, 'full', auth.uid()) returning id into v_id;
+  insert into public.stock_check_lines (check_id, product_id)
+  select v_id, id from public.products where active;
+  return v_id;
+end $$;
+
+-- One item in the full stock take: the count, plus (optionally) a photo of
+-- the product and its barcode, which are saved against the product.
+create or replace function public.stocktake_record(
+  p_check uuid, p_product uuid, p_counted numeric, p_barcode text, p_photo_path text
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare other text;
+begin
+  perform public.require_staff();
+  if nullif(trim(p_barcode), '') is not null then
+    select pr.name into other from public.product_barcodes b join public.products pr on pr.id = b.product_id
+    where b.barcode = trim(p_barcode) and b.product_id <> p_product;
+    if other is not null then raise exception 'That barcode is already linked to %', other; end if;
+    insert into public.product_barcodes (barcode, product_id) values (trim(p_barcode), p_product)
+    on conflict (barcode) do nothing;
+  end if;
+  if nullif(p_photo_path, '') is not null then
+    perform public._add_photos('product', p_product, array[p_photo_path]);
+    update public.products set photo_path = p_photo_path where id = p_product and photo_path is null;
+  end if;
+  if p_counted is not null then
+    perform public.record_count(p_check, p_product, p_counted, null);
+  end if;
 end $$;
 
 -- ---------------------------------------------------------------- dashboard

@@ -10,7 +10,7 @@ export async function render(main, params) {
   const mgr = isManager();
   const [rota, history] = await Promise.all([
     rpc('check_rota', { p_weeks: 8 }),
-    q(sb.from('stock_checks').select('id, week_start, status, profiles:assigned_to(full_name)').order('week_start', { ascending: false }).limit(12))
+    q(sb.from('stock_checks').select('id, week_start, status, kind, profiles:assigned_to(full_name)').order('week_start', { ascending: false }).limit(12))
   ]);
   const thisWeek = rota[0];
   const checkId = params[0] || thisWeek.check_id;
@@ -26,7 +26,7 @@ export async function render(main, params) {
           <td class="num">${num(r.product_count)}</td><td>${badge(r.status)}</td></tr>`)}</tbody></table></div>
         <p class="muted">The rota takes turns through everyone ticked "In stock check rota" on the Users page.</p></div>
       <div class="card"><h2>Past checks</h2>${history.length ? html`<div class="table-wrap"><table><tbody>
-        ${history.map(h => html`<tr class="click" data-id="${h.id}"><td>${date(h.week_start)}</td><td>${h.profiles?.full_name || ''}</td><td>${badge(h.status)}</td></tr>`)}
+        ${history.map(h => html`<tr class="click" data-id="${h.id}"><td>${date(h.week_start)}${h.kind === 'full' ? html`<br><small>Full stock take</small>` : ''}</td><td>${h.profiles?.full_name || ''}</td><td>${badge(h.status)}</td></tr>`)}
         </tbody></table></div>` : html`<p class="muted">None yet.</p>`}</div>
     </div>`;
   main.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => { location.hash = '#/stock-check/' + tr.dataset.id; });
@@ -56,7 +56,7 @@ async function showCheck(box, id, mgr, reload) {
   const review = mgr && c.status !== 'open';
 
   box.innerHTML = html`<div class="card">
-    <div class="page-head" style="margin:0"><div><h2 style="margin-top:0">Week of ${date(c.week_start)} ${badge(c.status)}</h2>
+    <div class="page-head" style="margin:0"><div><h2 style="margin-top:0">${c.kind === 'full' ? 'Full stock take ' + date(c.week_start) : 'Week of ' + date(c.week_start)} ${badge(c.status)}</h2>
       <p class="muted">${num(counted)} of ${num(lines.length)} counted · on the rota: ${c.assigned?.full_name || 'nobody'}
       ${c.submitted_at ? html` · submitted by ${c.submitter?.full_name} ${dateTime(c.submitted_at)}` : ''}
       ${c.approved_at ? html` · approved by ${c.approver?.full_name} ${dateTime(c.approved_at)}` : ''}</p></div>

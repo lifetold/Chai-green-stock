@@ -22,5 +22,10 @@ See README.md for features and setup.
    sign-up. For password-reset emails, the user should set Authentication →
    URL Configuration → Site URL to the Vercel address (optional).
 
-The user is non-technical: keep instructions short and do the work yourself.
+## Working with the user (their instructions — always follow)
+- Never ask the user to find someone else (IT person, colleague, etc.) to do a task.
+  Claude chose the tools for this project, so Claude owns any set-up problems.
+- The user is non-technical: do the work yourself wherever possible. When the user
+  must do something, give ONE small step at a time, in plain words, and don't
+  assume what they can see. Ask them what's on screen.
 Never use the service_role key in browser code.

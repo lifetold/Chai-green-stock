@@ -102,6 +102,11 @@ function showLogin(mode = 'signin') {
           options: { data: { full_name: f.name }, emailRedirectTo: location.origin + '/' }
         });
         if (error) return fail(error);
+        // Emails are confirmed automatically (see schema.sql), so sign straight in.
+        if (!data.session) {
+          const { error: e2 } = await sb.auth.signInWithPassword({ email: f.email, password: f.password });
+          if (!e2) return;
+        }
         if (!data.session) {
           app.querySelector('.card').innerHTML = `<div class="notice ok">Nearly there. We've sent a link to
             <b>${esc(f.email)}</b>. Click it to confirm your email, then ask a manager to switch your account on.</div>`;

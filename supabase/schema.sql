@@ -170,6 +170,16 @@ create index if not exists products_name_idx on public.products (lower(name));
 alter table public.products add column if not exists sell_price numeric(12,2);
 alter table public.products add column if not exists sort_order int;
 
+-- Logistics (third-party storage and delivery). A supplier marked as a
+-- logistics company can store and deliver products for us; its charge per
+-- unit is added to the product's cost ("landed cost"), so prices and
+-- margins include it. stored_by = null means our own warehouse.
+alter table public.suppliers add column if not exists is_logistics boolean not null default false;
+alter table public.suppliers add column if not exists logistics_cost_per_unit numeric(12,4);
+alter table public.suppliers add column if not exists logistics_rates text;
+alter table public.products add column if not exists stored_by uuid references public.suppliers(id) on delete set null;
+alter table public.products add column if not exists logistics_cost numeric(12,4);  -- per unit; null = company's standard charge
+
 create table if not exists public.product_barcodes (
   barcode     text primary key,
   product_id  uuid not null references public.products(id) on delete cascade,
@@ -501,13 +511,20 @@ base as (
     i.next_due,
     e.next_expiry,
     s.safety_stock_days,
-    case when p.sell_price > 0 and p.cost_price > 0
-         then round((p.sell_price / p.cost_price - 1) * 100, 2)
+    case when p.sell_price > 0 and lc.landed > 0
+         then round((p.sell_price / lc.landed - 1) * 100, 2)
          else coalesce(p.margin_pct, s.default_margin_pct) end as eff_margin_pct,
-    coalesce(p.vat_rate, s.default_vat_rate) as eff_vat_rate
+    coalesce(p.vat_rate, s.default_vat_rate) as eff_vat_rate,
+    lg.name as stored_by_name,
+    lc.logistics as logistics_unit_cost,
+    lc.landed as landed_cost
   from public.products p
   cross join s
   left join public.suppliers sup on sup.id = p.supplier_id
+  left join public.suppliers lg on lg.id = p.stored_by
+  cross join lateral (select
+      case when p.stored_by is not null then coalesce(p.logistics_cost, lg.logistics_cost_per_unit, 0) else 0 end as logistics,
+      p.cost_price + case when p.stored_by is not null then coalesce(p.logistics_cost, lg.logistics_cost_per_unit, 0) else 0 end as landed) lc
   left join usage u on u.product_id = p.id
   left join incoming i on i.product_id = p.id
   left join expiry e on e.product_id = p.id
@@ -522,7 +539,7 @@ calc as (
 select c.*,
   coalesce(c.reorder_qty,
     greatest(1, ceil(c.daily_usage * 28 + c.eff_reorder_point - c.qty_on_hand - c.on_order))) as eff_reorder_qty,
-  coalesce(nullif(c.sell_price, 0), round(c.cost_price * (1 + c.eff_margin_pct / 100), 2)) as franchise_price,
+  coalesce(nullif(c.sell_price, 0), round(c.landed_cost * (1 + c.eff_margin_pct / 100), 2)) as franchise_price,
   case
     when not c.active then 'inactive'
     when c.qty_on_hand <= 0 then 'out'
@@ -635,6 +652,7 @@ $$;
 revoke all on function public._add_photos from public, anon, authenticated;
 
 -- Price a product for a store.
+-- "Cost" here is the landed cost: cost price + any logistics charge per unit.
 --   company-owned store → cost, no margin
 --   franchise store     → the store's agreed margin on cost, if it has one;
 --                         otherwise the product's selling price, if set;
@@ -642,19 +660,22 @@ revoke all on function public._add_photos from public, anon, authenticated;
 create or replace function public.price_for(p_product uuid, p_store uuid)
 returns table (unit_cost numeric, margin_pct numeric, unit_price numeric, vat_rate numeric)
 language sql stable security definer set search_path = public as $$
-  select p.cost_price,
-         case when pr.price is null or p.cost_price <= 0 then 0
-              else least(greatest(round((pr.price / p.cost_price - 1) * 100, 2), -999), 9999) end,
+  select lc.landed,
+         case when pr.price is null or lc.landed <= 0 then 0
+              else least(greatest(round((pr.price / lc.landed - 1) * 100, 2), -999), 9999) end,
          pr.price,
          coalesce(p.vat_rate, s.default_vat_rate)
   from public.products p
   cross join public.settings s
   cross join public.stores st
+  left join public.suppliers lg on lg.id = p.stored_by
+  cross join lateral (select p.cost_price + case when p.stored_by is not null
+      then coalesce(p.logistics_cost, lg.logistics_cost_per_unit, 0) else 0 end as landed) lc
   cross join lateral (select case
-      when st.type = 'company' then p.cost_price
-      when st.margin_pct is not null then round(p.cost_price * (1 + st.margin_pct / 100), 2)
+      when st.type = 'company' then round(lc.landed, 2)
+      when st.margin_pct is not null then round(lc.landed * (1 + st.margin_pct / 100), 2)
       when p.sell_price > 0 then p.sell_price
-      else round(p.cost_price * (1 + coalesce(p.margin_pct, s.default_margin_pct) / 100), 2)
+      else round(lc.landed * (1 + coalesce(p.margin_pct, s.default_margin_pct) / 100), 2)
     end as price) pr
   where p.id = p_product and st.id = p_store and s.id = 1 and public.is_staff()
 $$;

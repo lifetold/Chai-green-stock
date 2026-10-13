@@ -8,9 +8,10 @@ const TYPE = { goods_in: 'Goods in', dispatch: 'Stock out', adjustment: 'Adjustm
 export async function render(main, params) {
   const isNew = params[0] === 'new';
   const mgr = isManager();
-  const [p, sups, cats, stores] = await Promise.all([
+  const [p, sups, cats, stores, logistics] = await Promise.all([
     isNew ? null : q(sb.from('product_stock').select('*').eq('id', params[0]).single()),
-    suppliers(true), categories(), q(sb.from('stores').select('name, type, margin_pct').eq('active', true).order('name'))
+    suppliers(true), categories(), q(sb.from('stores').select('name, type, margin_pct').eq('active', true).order('name')),
+    q(sb.from('suppliers').select('id, name').eq('is_logistics', true).eq('active', true).order('name'))
   ]);
   if (isNew && !mgr) { main.innerHTML = '<div class="notice bad">Only managers can add products here. Scan new items in at Goods in.</div>'; return; }
   const S = state.settings;
@@ -38,12 +39,14 @@ export async function render(main, params) {
 
     ${isNew ? '' : html`<div class="card"><h2>Prices</h2><div class="price-grid">
       <div><div class="k">Cost (ex VAT)</div><div class="v">${money(p.cost_price)}</div></div>
-      <div><div class="k">Company-owned stores</div><div class="v">${money(p.cost_price)}</div><small>cost, no margin</small></div>
+      ${Number(p.logistics_unit_cost) > 0 ? html`<div><div class="k">+ Logistics (${p.stored_by_name})</div><div class="v">${money(p.logistics_unit_cost)}</div></div>
+        <div><div class="k">Landed cost</div><div class="v">${money(p.landed_cost)}</div></div>` : ''}
+      <div><div class="k">Company-owned stores</div><div class="v">${money(p.landed_cost)}</div><small>cost, no margin</small></div>
       <div><div class="k">Franchise stores</div><div class="v">${money(p.franchise_price)}</div><small>${Number(p.sell_price) > 0 ? 'selling price' : 'cost + ' + num(p.eff_margin_pct) + '%' + (p.margin_pct == null ? ' (default)' : '')}</small></div>
       <div><div class="k">VAT</div><div class="v">${num(p.eff_vat_rate)}%</div></div>
     </div>
     ${stores.some(s => s.type === 'franchise' && s.margin_pct != null) ? html`<p class="muted" style="margin-top:.75rem">Stores with their own agreed margin:
-      ${stores.filter(s => s.type === 'franchise' && s.margin_pct != null).map((s, i) => html`${i ? ', ' : ''}${s.name} ${money(Math.round(p.cost_price * (1 + s.margin_pct / 100) * 100) / 100)} (${num(s.margin_pct)}%)`)}</p>` : ''}
+      ${stores.filter(s => s.type === 'franchise' && s.margin_pct != null).map((s, i) => html`${i ? ', ' : ''}${s.name} ${money(Math.round(p.landed_cost * (1 + s.margin_pct / 100) * 100) / 100)} (${num(s.margin_pct)}%)`)}</p>` : ''}
     </div>`}
 
     <form class="card" data-form autocomplete="off">
@@ -58,6 +61,8 @@ export async function render(main, params) {
         ${field('pack_size', 'Pack size', '', 'e.g. 6 x 1kg')}
         ${field('location', 'Warehouse location', '', 'bay / shelf / bin')}
         <label>Supplier<select name="supplier_id" ${mgr ? '' : raw('disabled')}>${raw(options(sups, v.supplier_id, { blank: '— none —' }))}</select></label>
+        ${logistics.length || v.stored_by ? html`<label>Stored at<select name="stored_by" ${mgr ? '' : raw('disabled')}>${raw(options(logistics, v.stored_by, { blank: 'Our warehouse' }))}</select></label>` : ''}
+        ${logistics.length ? field('logistics_cost', 'Logistics charge per unit £', 'type="number" step="0.0001" min="0" inputmode="decimal" placeholder="their standard charge"', 'only if stored by a logistics company') : ''}
         ${field('supplier_code', "Supplier's product code")}
       </div>
       <h3>Pricing</h3>
@@ -122,7 +127,7 @@ export async function render(main, params) {
     busy(form.querySelector('[type=submit]'), async () => {
       try {
         const f = formData(form);
-        for (const k of ['cost_price', 'sell_price', 'margin_pct', 'vat_rate', 'lead_time_days', 'reorder_point', 'reorder_qty', 'min_stock']) {
+        for (const k of ['cost_price', 'logistics_cost', 'sell_price', 'margin_pct', 'vat_rate', 'lead_time_days', 'reorder_point', 'reorder_qty', 'min_stock']) {
           f[k] = f[k] == null ? null : Number(f[k]);
         }
         f.cost_price = f.cost_price ?? 0;

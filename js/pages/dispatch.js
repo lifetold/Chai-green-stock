@@ -7,9 +7,9 @@ import { refreshCounts } from '../app.js';
 
 // Same rule as price_for() in the database (the database has the final say).
 export function priceFor(product, store, settings) {
-  const cost = Number(product.cost_price);
+  const cost = Number(product.landed_cost ?? product.cost_price);  // includes any logistics charge
   const round = n => Math.round(n * 100) / 100;
-  if (!store || store.type === 'company') return { price: cost };
+  if (!store || store.type === 'company') return { price: round(cost) };
   if (store.margin_pct != null) return { price: round(cost * (1 + Number(store.margin_pct) / 100)) };
   if (Number(product.sell_price) > 0) return { price: Number(product.sell_price) };
   return { price: round(cost * (1 + Number(product.margin_pct ?? settings.default_margin_pct) / 100)) };
@@ -144,6 +144,23 @@ export async function render(main, params) {
           <a class="btn" href="#/dispatches/${res.dispatch_id}">Delivery note</a>
           <button class="btn" data-again>Book out another</button></div></div>`;
       main.querySelector('[data-again]').onclick = () => render(main, []);
+      // stock held by a logistics company: send them the pick-and-deliver order
+      const byCo = {};
+      lines.filter(l => l.product.stored_by).forEach(l => (byCo[l.product.stored_by] ||= []).push(l));
+      const ids = Object.keys(byCo);
+      if (ids.length) {
+        const cos = await q(sb.from('suppliers').select('id, name, email').in('id', ids));
+        const box = document.createElement('div');
+        box.className = 'card';
+        box.innerHTML = html`<h2>Stock held by a logistics company</h2>
+          <p>Send them the order so they pick and deliver it to ${s.name}.</p>
+          <div class="btn-row">${cos.map(c => html`<a class="btn primary" href="${'mailto:' + encodeURIComponent(c.email || '') +
+            '?subject=' + encodeURIComponent(`Delivery order ${res.dispatch_ref} for ${s.name}`) +
+            '&body=' + encodeURIComponent(`Please pick and deliver the following to:\n${s.name}\n${s.address || ''}\n\n` +
+              byCo[c.id].map(l => `${l.qty} x ${l.product.name}${l.product.sku ? ' [' + l.product.sku + ']' : ''}`).join('\n') +
+              `\n\nOur reference: ${res.dispatch_ref}\nThank you,\n${S.company_name}`)}">Email order to ${c.name}</a>`)}</div>`;
+        main.appendChild(box);
+      }
     } catch (err) { fail(err); }
   });
 }

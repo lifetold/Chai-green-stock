@@ -37,7 +37,7 @@ export async function render(main) {
       if (st === 'attention' && r.stock_status === 'ok' && !(r.next_expiry && r.next_expiry <= soon)) return false;
       if (st === 'expiring' && !(r.next_expiry && r.next_expiry <= soon)) return false;
       if (cat && r.category !== cat) return false;
-      if (term && ![r.name, r.sku, r.location, r.category, r.supplier_name].some(v => (v || '').toLowerCase().includes(term))) return false;
+      if (term && ![r.name, r.sku, r.location, r.category, r.supplier_name, r.stored_by_name].some(v => (v || '').toLowerCase().includes(term))) return false;
       return true;
     });
     const value = shown.reduce((a, r) => a + Math.max(0, r.qty_on_hand) * r.cost_price, 0);
@@ -48,7 +48,7 @@ export async function render(main) {
       <tbody>${shown.map(r => html`<tr class="click" data-id="${r.id}">
         <td>${thumb(r)}</td>
         <td><b>${r.name}</b><br><small>${[r.sku, r.pack_size, r.category].filter(Boolean).join(' · ')}</small></td>
-        <td>${r.location || ''}</td>
+        <td>${r.location || ''}${r.stored_by_name ? html`<br><span class="badge on_order">${r.stored_by_name}</span>` : ''}</td>
         <td class="num"><b>${num(r.qty_on_hand)}</b> ${r.unit}</td>
         <td class="num">${num(r.eff_reorder_point)}${r.reorder_point == null ? html`<br><small>auto</small>` : ''}</td>
         <td class="num">${r.on_order ? num(r.on_order) : ''}</td>

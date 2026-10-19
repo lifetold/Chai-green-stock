@@ -2,7 +2,8 @@
 
 Stock management web app for Chai Green (company-owned + franchised stores).
 Static HTML/JS (no build) on Vercel + Supabase (database, auth, photo storage).
-See README.md for features and setup.
+See README.md for features and setup, and docs/PROJECT-HISTORY.md for everything done so far
+(menu costing document, supplier research, spreadsheet, open items).
 
 ## Current status
 - Code complete and tested end-to-end (local PostgREST harness, 20 browser checks).

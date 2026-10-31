@@ -23,6 +23,12 @@ See README.md for features and setup, and docs/PROJECT-HISTORY.md for everything
 - Stores side (31 Oct 2026): daily/monthly safety checks with server-timed "rushed"
   flags, EHO read-only records, head-office overview, recipes, allergen chart, manual
   (supabase/seed-stores.sql has the starter content).
+- SAMPLE DATA (31 Oct 2026): 7 test logins (test-*@example.com, roles manager/staff/
+  store_manager/store/inspector; password given to the user in chat, not stored here), 3 staff
+  per store (PIN 1234), 14 days of check runs, 4 POs, 2 goods-ins, 24 dispatches/invoices,
+  4 write-offs, a submitted weekly stock check. Every sample row id is in `sample.rows`; stock
+  and invoice counter before seeding are in `sample.products_before`, `sample.batches_before`,
+  `sample.settings_before`, so it can all be removed exactly when the user is ready to go live.
 
 ## To finish setup (when the Supabase connector points at the Chai Green account)
 1. `list_organizations` → pick the Chai Green org (NOT Wizardtec).

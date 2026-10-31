@@ -1041,3 +1041,366 @@ $$;
 revoke execute on all functions in schema public from public, anon;
 grant execute on all functions in schema public to authenticated;
 revoke execute on function public._move_stock, public._add_photos from authenticated;
+
+-- ==================================================================
+-- STORES: SAFETY CHECKS, EHO RECORDS, RECIPES AND OPERATIONS MANUAL
+-- ==================================================================
+-- Roles
+--   admin / manager  head office: see every store, edit checklists, recipes, manual
+--   staff            warehouse staff (stock tools only)
+--   store_manager    a store's manager: daily checks, records, recipes, store team
+--   store            a shared store device: daily checks, recipes, manual
+--   inspector        Environmental Health Officer: read-only records for one store,
+--                    until access_expires_at
+alter table public.profiles add column if not exists store_id uuid references public.stores(id);
+alter table public.profiles add column if not exists access_expires_at timestamptz;
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role in ('admin','manager','staff','store_manager','store','inspector'));
+
+create or replace function public.my_role() returns text
+language sql stable security definer set search_path = public as $$
+  select role from public.profiles
+  where id = auth.uid() and active and (access_expires_at is null or access_expires_at > now())
+$$;
+
+-- Warehouse and head-office people only: store accounts and inspectors
+-- never see stock, costs, suppliers or invoices.
+create or replace function public.is_staff() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(public.my_role() in ('admin','manager','staff'), false)
+$$;
+
+create or replace function public.my_store() returns uuid
+language sql stable security definer set search_path = public as $$
+  select store_id from public.profiles where id = auth.uid()
+$$;
+
+create or replace function public.is_active_user() returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.my_role() is not null
+$$;
+
+-- Can see a store's safety records.
+create or replace function public.can_view_store(p_store uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select case
+    when public.is_manager() then true
+    when public.my_role() in ('store_manager','store','inspector') then p_store = public.my_store()
+    else false end
+$$;
+
+-- Can carry out checks for a store.
+create or replace function public.can_check_store(p_store uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select case
+    when public.is_manager() then true
+    when public.my_role() in ('store_manager','store') then p_store = public.my_store()
+    else false end
+$$;
+
+-- Can manage a store's team (names and PINs).
+create or replace function public.can_manage_team(p_store uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_manager() or (public.my_role() = 'store_manager' and p_store = public.my_store())
+$$;
+
+-- Everyone signed in can read the company details (shown on printed records).
+drop policy if exists "active read settings" on public.settings;
+create policy "active read settings" on public.settings for select to authenticated using (public.is_active_user());
+
+-- Store people can see their own store (name, address).
+drop policy if exists "store sees own store" on public.stores;
+create policy "store sees own store" on public.stores for select to authenticated
+  using (public.can_view_store(id));
+
+-- ---------------------------------------------------------------- store team
+create table if not exists public.staff_members (
+  id          uuid primary key default gen_random_uuid(),
+  store_id    uuid not null references public.stores(id),
+  name        text not null,
+  role_title  text,                      -- e.g. Barista, Kitchen, Supervisor
+  pin_hash    text,                      -- bcrypt of the 4-digit PIN; never sent to the browser
+  active      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+alter table public.staff_members enable row level security;
+revoke all on public.staff_members from anon, authenticated;
+grant select (id, store_id, name, role_title, active, created_at) on public.staff_members to authenticated;
+drop policy if exists "view team" on public.staff_members;
+create policy "view team" on public.staff_members for select to authenticated using (public.can_view_store(store_id));
+
+create or replace function public.save_staff_member(p_id uuid, p_store uuid, p_name text, p_role_title text,
+  p_pin text, p_active boolean default true) returns uuid
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_id uuid := p_id;
+begin
+  if not public.can_manage_team(p_store) then raise exception 'Only a manager can change the store team'; end if;
+  if nullif(trim(p_name), '') is null then raise exception 'Enter a name'; end if;
+  if p_pin is not null and p_pin !~ '^[0-9]{4}$' then raise exception 'The PIN must be 4 numbers'; end if;
+  if v_id is null then
+    if p_pin is null then raise exception 'Choose a 4-number PIN'; end if;
+    insert into public.staff_members (store_id, name, role_title, pin_hash, active)
+    values (p_store, trim(p_name), nullif(trim(p_role_title), ''), crypt(p_pin, gen_salt('bf')), coalesce(p_active, true))
+    returning id into v_id;
+  else
+    update public.staff_members set name = trim(p_name), role_title = nullif(trim(p_role_title), ''),
+      active = coalesce(p_active, active),
+      pin_hash = case when p_pin is null then pin_hash else crypt(p_pin, gen_salt('bf')) end
+    where id = v_id and store_id = p_store;
+    if not found then raise exception 'Team member not found'; end if;
+  end if;
+  return v_id;
+end $$;
+
+create or replace function public.check_pin(p_staff uuid, p_pin text) returns boolean
+language plpgsql stable security definer set search_path = public, extensions as $$
+declare m record;
+begin
+  select * into m from public.staff_members where id = p_staff and active;
+  if not found or not public.can_check_store(m.store_id) then return false; end if;
+  return m.pin_hash = crypt(coalesce(p_pin, ''), m.pin_hash);
+end $$;
+
+-- ---------------------------------------------------------------- checklists
+create table if not exists public.check_templates (
+  id                uuid primary key default gen_random_uuid(),
+  name              text not null unique,
+  kind              text not null default 'daily' check (kind in ('daily','monthly')),
+  description       text,
+  icon              text,
+  min_seconds       numeric not null default 3,   -- quicker than this per question = "rushed"
+  manager_only      boolean not null default false, -- e.g. the monthly management audit
+  sort_order        int not null default 0,
+  active            boolean not null default true,
+  created_at        timestamptz not null default now()
+);
+
+create table if not exists public.check_items (
+  id           uuid primary key default gen_random_uuid(),
+  template_id  uuid not null references public.check_templates(id) on delete cascade,
+  sort_order   int not null default 0,
+  section      text,
+  question     text not null,
+  help         text,
+  kind         text not null default 'yes_no' check (kind in ('yes_no','temperature','number','text')),
+  expected     text not null default 'yes',      -- yes_no: the safe answer
+  min_value    numeric,                           -- temperature / number: safe range
+  max_value    numeric,
+  critical     boolean not null default false,
+  actions      text[] not null default '{}',      -- what to do if it fails
+  active       boolean not null default true,
+  unique (template_id, question)
+);
+
+create table if not exists public.check_runs (
+  id               uuid primary key default gen_random_uuid(),
+  template_id      uuid not null references public.check_templates(id),
+  template_name    text not null,
+  store_id         uuid not null references public.stores(id),
+  staff_member_id  uuid references public.staff_members(id),
+  profile_id       uuid references public.profiles(id),
+  done_by          text not null,
+  started_at       timestamptz not null default now(),
+  last_at          timestamptz not null default now(),
+  finished_at      timestamptz,
+  status           text not null default 'in_progress' check (status in ('in_progress','complete','abandoned')),
+  total_items      int not null default 0,
+  answered         int not null default 0,
+  passed           int not null default 0,
+  failed           int not null default 0,
+  critical_failed  int not null default 0,
+  rushed_items     int not null default 0,
+  rushed           boolean not null default false,
+  duration_seconds int,
+  score            numeric(5,1)
+);
+create index if not exists check_runs_store_day on public.check_runs (store_id, started_at desc);
+
+create table if not exists public.check_answers (
+  id                uuid primary key default gen_random_uuid(),
+  run_id            uuid not null references public.check_runs(id) on delete cascade,
+  item_id           uuid references public.check_items(id) on delete set null,
+  sort_order        int,
+  section           text,
+  question          text not null,
+  kind              text not null,
+  answer            text,
+  value             numeric,
+  ok                boolean not null,
+  critical          boolean not null default false,
+  corrective_action text,
+  note              text,
+  photo_path        text,
+  seconds           numeric,
+  rushed            boolean not null default false,
+  answered_at       timestamptz not null default now(),
+  unique (run_id, item_id)
+);
+
+alter table public.check_templates enable row level security;
+alter table public.check_items enable row level security;
+alter table public.check_runs enable row level security;
+alter table public.check_answers enable row level security;
+drop policy if exists "read checklists" on public.check_templates;
+create policy "read checklists" on public.check_templates for select to authenticated using (public.is_active_user());
+drop policy if exists "manage checklists" on public.check_templates;
+create policy "manage checklists" on public.check_templates for all to authenticated using (public.is_manager()) with check (public.is_manager());
+drop policy if exists "read checklist items" on public.check_items;
+create policy "read checklist items" on public.check_items for select to authenticated using (public.is_active_user());
+drop policy if exists "manage checklist items" on public.check_items;
+create policy "manage checklist items" on public.check_items for all to authenticated using (public.is_manager()) with check (public.is_manager());
+drop policy if exists "view runs" on public.check_runs;
+create policy "view runs" on public.check_runs for select to authenticated using (public.can_view_store(store_id));
+drop policy if exists "view answers" on public.check_answers;
+create policy "view answers" on public.check_answers for select to authenticated
+  using (exists (select 1 from public.check_runs r where r.id = run_id and public.can_view_store(r.store_id)));
+
+-- Start a check. Store staff pick their name and type their PIN; head-office
+-- managers (e.g. the monthly audit) sign with their own login.
+create or replace function public.start_check(p_template uuid, p_store uuid, p_staff uuid, p_pin text) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare t record; v_by text; v_run uuid; v_items int;
+begin
+  select * into t from public.check_templates where id = p_template and active;
+  if not found then raise exception 'Checklist not found'; end if;
+  if not public.can_check_store(p_store) then raise exception 'You can''t do checks for this store'; end if;
+  if t.manager_only and public.my_role() not in ('admin','manager','store_manager') then
+    raise exception 'Only a manager can do the %', t.name;
+  end if;
+  if p_staff is not null then
+    if not public.check_pin(p_staff, p_pin) then raise exception 'Wrong PIN, try again'; end if;
+    select name into v_by from public.staff_members where id = p_staff and store_id = p_store;
+    if v_by is null then raise exception 'That person isn''t in this store''s team'; end if;
+  else
+    select coalesce(full_name, email) into v_by from public.profiles where id = auth.uid();
+  end if;
+  select count(*) into v_items from public.check_items where template_id = p_template and active;
+  -- leaving a check half way through abandons it
+  update public.check_runs set status = 'abandoned'
+    where template_id = p_template and store_id = p_store and status = 'in_progress';
+  insert into public.check_runs (template_id, template_name, store_id, staff_member_id, profile_id, done_by, total_items)
+  values (p_template, t.name, p_store, p_staff, auth.uid(), v_by, v_items)
+  returning id into v_run;
+  return v_run;
+end $$;
+
+-- Record one answer. The time taken is measured here on the server, from the
+-- previous answer (or the start), so it can't be faked by the device.
+create or replace function public.answer_check(p_run uuid, p_item uuid, p_answer text, p_value numeric,
+  p_action text default null, p_note text default null, p_photo text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r record; i record; t record; v_ok boolean; v_secs numeric; v_min numeric; v_prev record;
+begin
+  select * into r from public.check_runs where id = p_run for update;
+  if not found or r.status <> 'in_progress' then raise exception 'This check has already finished'; end if;
+  if not public.can_check_store(r.store_id) then raise exception 'You can''t do checks for this store'; end if;
+  select * into i from public.check_items where id = p_item and template_id = r.template_id;
+  if not found then raise exception 'Question not found'; end if;
+  select * into t from public.check_templates where id = r.template_id;
+
+  v_ok := case i.kind
+    when 'yes_no' then lower(coalesce(p_answer, '')) = lower(i.expected)
+    when 'text'   then nullif(trim(coalesce(p_answer, '')), '') is not null
+    else p_value is not null and (i.min_value is null or p_value >= i.min_value) and (i.max_value is null or p_value <= i.max_value)
+  end;
+  select * into v_prev from public.check_answers where run_id = p_run and item_id = p_item;
+  if found then
+    -- second call for the same question = adding what was done about a problem
+    update public.check_answers set corrective_action = coalesce(nullif(trim(p_action), ''), corrective_action),
+      note = coalesce(nullif(trim(p_note), ''), note), photo_path = coalesce(p_photo, photo_path)
+    where id = v_prev.id;
+  else
+    if i.kind in ('temperature','number') and p_value is null then raise exception 'Enter the reading'; end if;
+    v_secs := round(extract(epoch from now() - r.last_at)::numeric, 1);
+    v_min := t.min_seconds * case when i.kind in ('temperature','number') then 2 else 1 end;
+    insert into public.check_answers (run_id, item_id, sort_order, section, question, kind, answer, value, ok, critical,
+      corrective_action, note, photo_path, seconds, rushed)
+    values (p_run, p_item, i.sort_order, i.section, i.question, i.kind, p_answer, p_value, v_ok, i.critical,
+      nullif(trim(p_action), ''), nullif(trim(p_note), ''), p_photo, v_secs, v_secs < v_min);
+    update public.check_runs set last_at = now(), answered = answered + 1 where id = p_run;
+  end if;
+  if v_prev.id is not null then v_ok := v_prev.ok; end if;
+  return jsonb_build_object('ok', v_ok, 'critical', i.critical,
+    'needs_action', not v_ok and nullif(trim(coalesce(p_action, '')), '') is null and v_prev.corrective_action is null,
+    'actions', to_jsonb(i.actions));
+end $$;
+
+create or replace function public.finish_check(p_run uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r record; t record; a record; v_dur int;
+begin
+  select * into r from public.check_runs where id = p_run for update;
+  if not found or r.status <> 'in_progress' then raise exception 'This check has already finished'; end if;
+  if not public.can_check_store(r.store_id) then raise exception 'You can''t do checks for this store'; end if;
+  select * into t from public.check_templates where id = r.template_id;
+  select count(*) n, count(*) filter (where ok) passed, count(*) filter (where not ok) failed,
+         count(*) filter (where not ok and critical) crit, count(*) filter (where rushed) rushed,
+         count(*) filter (where not ok and corrective_action is null) unfixed
+    into a from public.check_answers where run_id = p_run;
+  if a.n < r.total_items then raise exception 'There are still % questions to answer', r.total_items - a.n; end if;
+  if a.unfixed > 0 then raise exception 'Say what was done about every problem before finishing'; end if;
+  v_dur := extract(epoch from now() - r.started_at)::int;
+  update public.check_runs set status = 'complete', finished_at = now(), duration_seconds = v_dur,
+    answered = a.n, passed = a.passed, failed = a.failed, critical_failed = a.crit, rushed_items = a.rushed,
+    -- rushed: a third or more of the answers were too quick, or the whole check was
+    rushed = (a.n > 0 and (a.rushed * 3 >= a.n or v_dur < a.n * t.min_seconds)),
+    score = case when a.n = 0 then null else round(100.0 * a.passed / a.n, 1) end
+  where id = p_run
+  returning * into r;
+  return to_jsonb(r);
+end $$;
+
+-- ---------------------------------------------------------------- recipe cards
+create table if not exists public.recipes (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null unique,
+  category      text not null default 'Other',
+  description   text,
+  price         numeric(8,2),
+  allergens     text[] not null default '{}',     -- the 14 UK allergens it contains
+  allergens_confirmed boolean not null default false, -- ticked once checked against the supplier's product specification
+  dietary       text[] not null default '{}',     -- V, VG, Halal…
+  portion       text,
+  ingredients   jsonb not null default '[]',      -- [{name, qty, code}]  (code = Brakes product code)
+  method        text,                             -- one step per line
+  plating       text,                             -- how it should look; one point per line
+  hold_notes    text,                             -- holding / shelf life / reheating
+  photo_path    text,
+  sort_order    int not null default 0,
+  active        boolean not null default true,
+  updated_at    timestamptz not null default now()
+);
+alter table public.recipes enable row level security;
+drop policy if exists "read recipes" on public.recipes;
+create policy "read recipes" on public.recipes for select to authenticated using (public.is_active_user());
+drop policy if exists "manage recipes" on public.recipes;
+create policy "manage recipes" on public.recipes for all to authenticated using (public.is_manager()) with check (public.is_manager());
+
+-- ---------------------------------------------------------------- operations manual
+create table if not exists public.manual_pages (
+  id          uuid primary key default gen_random_uuid(),
+  section     text not null,
+  title       text not null,
+  body        text not null default '',
+  sort_order  int not null default 0,
+  updated_at  timestamptz not null default now(),
+  unique (section, title)
+);
+alter table public.manual_pages enable row level security;
+drop policy if exists "read manual" on public.manual_pages;
+create policy "read manual" on public.manual_pages for select to authenticated using (public.is_active_user());
+drop policy if exists "manage manual" on public.manual_pages;
+create policy "manage manual" on public.manual_pages for all to authenticated using (public.is_manager()) with check (public.is_manager());
+
+-- Photos: store people can upload check photos, and read check and recipe photos.
+drop policy if exists "store read photos" on storage.objects;
+create policy "store read photos" on storage.objects for select to authenticated
+  using (bucket_id = 'photos' and public.is_active_user() and (name like 'checks/%' or name like 'recipes/%'));
+drop policy if exists "store upload check photos" on storage.objects;
+create policy "store upload check photos" on storage.objects for insert to authenticated
+  with check (bucket_id = 'photos' and public.my_role() in ('store_manager','store') and name like 'checks/%');
+
+revoke execute on all functions in schema public from public, anon;
+grant execute on all functions in schema public to authenticated;
+revoke execute on function public._move_stock, public._add_photos from authenticated;

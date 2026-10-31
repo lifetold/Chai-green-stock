@@ -18,7 +18,14 @@ const ROUTES = {
   'stores':          () => import('./pages/stores.js'),
   'suppliers':       () => import('./pages/suppliers.js'),
   'settings':        () => import('./pages/settings.js'),
-  'users':           () => import('./pages/users.js')
+  'users':           () => import('./pages/users.js'),
+  'checks':          () => import('./pages/checks.js'),
+  'records':         () => import('./pages/records.js'),
+  'safety':          () => import('./pages/safety.js'),
+  'recipes':         () => import('./pages/recipes.js'),
+  'manual':          () => import('./pages/manual.js'),
+  'team':            () => import('./pages/team.js'),
+  'check-setup':     () => import('./pages/check-setup.js')
 };
 
 const NAV = [
@@ -29,6 +36,14 @@ const NAV = [
   ['stock-check', '✅', 'Stock check'],
   ['stock-take', '📋', 'Full stock take'],
   ['adjust', '♻️', 'Write-off / adjust'],
+  ['Stores & food safety', null, null, null, 'manager'],
+  ['safety', '🛡️', 'All stores overview', null, 'manager'],
+  ['checks', '✔️', "Today's checks", null, 'manager'],
+  ['records', '🗂️', 'Safety records', null, 'manager'],
+  ['recipes', '🍰', 'Recipes & allergens', null, 'manager'],
+  ['manual', '📘', 'Operations manual', null, 'manager'],
+  ['team', '🧑‍🍳', 'Store teams', null, 'manager'],
+  ['check-setup', '🛠️', 'Checklists', null, 'manager'],
   ['Stock'],
   ['stock', '📦', 'Products & stock'],
   ['reorder', '🔔', 'Reorder', 'reorder'],
@@ -43,6 +58,23 @@ const NAV = [
   ['settings', '⚙️', 'Settings', null, 'manager'],
   ['users', '👥', 'Users', 'users', 'admin']
 ];
+
+// What store accounts and Environmental Health Officers see instead.
+const STORE_NAV = [
+  ['My store'],
+  ['checks', '✔️', "Today's checks"],
+  ['records', '🗂️', 'Safety records'],
+  ['recipes', '🍰', 'Recipes & allergens'],
+  ['manual', '📘', 'Operations manual'],
+  ['team', '🧑‍🍳', 'Store team', null, 'store_manager']
+];
+const INSPECTOR_NAV = [
+  ['Inspection'],
+  ['records', '🗂️', 'Food safety records'],
+  ['recipes/allergens', '⚠️', 'Allergen chart'],
+  ['recipes', '🍰', 'Recipes']
+];
+const STORE_HOME = { store: 'checks', store_manager: 'checks', inspector: 'records' };
 
 const app = document.getElementById('app');
 
@@ -158,27 +190,34 @@ async function start(user) {
 
 // ------------------------------------------------------------------ shell
 function renderShell() {
-  const canSee = need => !need || (need === 'manager' ? isManager() : isAdmin());
+  const role = state.profile.role;
+  const canSee = need => !need || (need === 'manager' ? isManager() : need === 'store_manager' ? role === 'store_manager' : isAdmin());
+  const nav = role === 'inspector' ? INSPECTOR_NAV : STORE_HOME[role] ? STORE_NAV : NAV;
+  const home = STORE_HOME[role];
   app.innerHTML = html`
     <header class="topbar">
       <button class="menu-btn" aria-label="Menu">☰</button>
-      <a class="brand" href="#/">Chai Green <span>Stock</span></a>
+      <a class="brand" href="#/">Chai Green <span>${home ? 'Stores' : 'Stock'}</span></a>
       <div class="spacer"></div>
       <div class="who">${state.profile.full_name || state.user.email}</div>
       <button id="signout">Sign out</button>
     </header>
     <div class="shell">
-      <nav class="side">${NAV.filter(n => canSee(n[4])).map(n => n.length === 1
+      <nav class="side">${nav.filter(n => canSee(n[4])).map(n => !n[1]
         ? html`<div class="group">${n[0]}</div>`
         : html`<a href="#/${n[0]}" data-route="${n[0]}"><span>${n[1]}</span>${n[2]}${n[3] ? html`<span class="badge hidden" data-count="${n[3]}"></span>` : ''}</a>`)}
       </nav>
       <main id="main"></main>
     </div>
-    <nav class="quickbar">
+    <nav class="quickbar">${home ? html`
+      <a href="#/checks" data-route="checks"><span class="ico">✔️</span>Checks</a>
+      <a href="#/records" data-route="records"><span class="ico">🗂️</span>Records</a>
+      ${role === 'inspector' ? '' : html`<a href="#/recipes" data-route="recipes"><span class="ico">🍰</span>Recipes</a>
+      <a href="#/manual" data-route="manual"><span class="ico">📘</span>Manual</a>`}` : html`
       <a href="#/" data-route=""><span class="ico">🏠</span>Home</a>
       <a href="#/goods-in" data-route="goods-in"><span class="ico">📥</span>Goods in</a>
       <a href="#/dispatch" data-route="dispatch"><span class="ico">📤</span>Stock out</a>
-      <a href="#/stock" data-route="stock"><span class="ico">📦</span>Stock</a>
+      <a href="#/stock" data-route="stock"><span class="ico">📦</span>Stock</a>`}
     </nav>`;
   app.querySelector('#signout').onclick = () => sb.auth.signOut();
   // Tapping a link to the page you're already on starts it afresh
@@ -193,6 +232,7 @@ function renderShell() {
 
 // Little number badges in the menu (things needing attention).
 export async function refreshCounts() {
+  if (!isManager() && state.profile.role !== 'staff') return;
   try {
     const s = await q(sb.rpc('dashboard_summary'));
     setCount('reorder', s?.to_reorder);
@@ -210,7 +250,11 @@ let routeSeq = 0;
 async function route() {
   runCleanups();
   document.body.classList.remove('nav-open');
-  const [name, ...params] = location.hash.replace(/^#\/?/, '').split('/');
+  let [name, ...params] = location.hash.replace(/^#\/?/, '').split('/');
+  const home = STORE_HOME[state.profile.role];
+  const STORE_PAGES = ['checks', 'records', 'recipes', 'manual', 'team'];
+  if (home && !STORE_PAGES.includes(name.split('?')[0])) name = home;
+  if (state.profile.role === 'inspector' && !['records', 'recipes'].includes(name.split('?')[0])) name = 'records';
   const key = name.split('?')[0];
   app.querySelectorAll('[data-route]').forEach(a => a.classList.toggle('active', a.dataset.route === key));
   const main = document.getElementById('main');
@@ -221,7 +265,7 @@ async function route() {
   try {
     const mod = await load();
     if (seq !== routeSeq) return;
-    await mod.render(main, params.map(decodeURIComponent));
+    await mod.render(main, params.map(p => decodeURIComponent(p.split('?')[0])));
     window.scrollTo(0, 0);
   } catch (e) {
     if (seq !== routeSeq) return;

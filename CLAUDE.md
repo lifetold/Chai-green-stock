@@ -9,15 +9,20 @@ See README.md for features and setup, and docs/PROJECT-HISTORY.md for everything
 - Code complete and tested end-to-end (local PostgREST harness, 20 browser checks).
 - Live on Vercel: https://chai-green-stock.vercel.app (project `chai-green-stock`,
   team `harperanddad-s-projects`, auto-deploys on push to `main`).
-- Connected to Supabase project `bysgrggktdjmwffupfjp` (London) in the user's
-  separate Chai Green Supabase account (not reachable via the Supabase connector,
-  which is signed in to the Wizardtec account). Schema loaded 13 Oct 2026.
-- To re-run supabase/schema.sql after changes: Vercel sandbox (private, temporary)
-  connecting to aws-0-eu-west-2.pooler.supabase.com:5432 as postgres.<ref>
-  (181 products + September stock-take quantities imported from the user's
-  spreadsheet on 13 Oct 2026; prices are NOT kept in this public repo)
-  with the database password (ask the user; never commit it). This sandbox can't
-  reach Supabase or vercel.app directly.
+- Database: Supabase project `aamacfkbpigtolysxgym` ("chai-green-stock", London) in the
+  user's Wizardtec Supabase organisation, created 31 Oct 2026 and reachable through the
+  Supabase connector (apply_migration / execute_sql). The first database
+  (`bysgrggktdjmwffupfjp`, separate Chai Green account) disappeared after being idle,
+  so `api/keep-alive.js` runs daily from the Vercel cron to stop the free project pausing.
+- Avoid UPDATE without WHERE and DROP in connector SQL: they trigger an approval box the
+  user can't see. Large SQL already in the public repo can be loaded with
+  `extensions.http_get('https://raw.githubusercontent.com/lifetold/chai-green-stock/<commit>/...')`.
+- 184 products + September stock-take quantities + 16 suppliers reloaded 31 Oct 2026
+  (prices are NOT kept in this public repo). Users must sign up again on the new
+  database; the first sign-up becomes admin.
+- Stores side (31 Oct 2026): daily/monthly safety checks with server-timed "rushed"
+  flags, EHO read-only records, head-office overview, recipes, allergen chart, manual
+  (supabase/seed-stores.sql has the starter content).
 
 ## To finish setup (when the Supabase connector points at the Chai Green account)
 1. `list_organizations` → pick the Chai Green org (NOT Wizardtec).

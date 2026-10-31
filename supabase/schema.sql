@@ -1404,3 +1404,10 @@ create policy "store upload check photos" on storage.objects for insert to authe
 revoke execute on all functions in schema public from public, anon;
 grant execute on all functions in schema public to authenticated;
 revoke execute on function public._move_stock, public._add_photos from authenticated;
+
+-- A tiny check-in the daily keep-alive job calls, so the free database is
+-- never paused for inactivity. It reveals nothing.
+create or replace function public.keep_alive() returns text
+language sql stable set search_path = public as $$ select 'ok ' || now()::date $$;
+grant execute on function public.keep_alive() to anon;
+

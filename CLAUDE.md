@@ -29,6 +29,11 @@ See README.md for features and setup, and docs/PROJECT-HISTORY.md for everything
   4 write-offs, a submitted weekly stock check. Every sample row id is in `sample.rows`; stock
   and invoice counter before seeding are in `sample.products_before`, `sample.batches_before`,
   `sample.settings_before`, so it can all be removed exactly when the user is ready to go live.
+  Check history was topped up to 9 Nov and 5 sample shop orders added (also in `sample.rows`).
+- Shop orders (9 Nov 2026): store_orders/store_order_lines, RPCs place_store_order,
+  order_catalogue, store_order_items, start_picking_store_order, mark_store_order_sent,
+  cancel_store_order, open_store_orders; page js/pages/orders.js; Stock out takes
+  `#/dispatch/<store>/<order>`. Local test: /var/tmp/harness/e2e-orders.js (7 checks pass).
 
 ## To finish setup (when the Supabase connector points at the Chai Green account)
 1. `list_organizations` → pick the Chai Green org (NOT Wizardtec).

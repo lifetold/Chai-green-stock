@@ -9,6 +9,7 @@ screen ("Add to Home Screen" / "Install app").
 | Area | What staff do | What the system does |
 | --- | --- | --- |
 | **Goods in** | Scan each item off the delivery, photograph the delivery and paperwork, enter use-by dates | Adds stock, records cost, books it against the purchase order. **An unknown barcode opens a "new product" form: photograph the packaging, name it, and the barcode is linked to it from then on.** |
+| **Shop orders** | Shops pick what they need from the product list (no costs shown); the warehouse packs it | New orders show on the dashboard and menu badge. "Book out with Stock out" fills in the lines; booking out raises the invoice and marks the order as sent. Shops can cancel until packing starts |
 | **Stock out** | Choose the store, scan everything going, photograph it, get the collector's name and signature | Takes it off stock (earliest use-by first), raises the **invoice** and a delivery note |
 | **Invoices** | Print / save PDF, email to the store, mark paid, void | Company-owned stores pay **cost**. Franchise stores pay **cost + margin**: the store's agreed margin if it has one, otherwise the product's margin, otherwise the default. Sequential numbers, VAT per product, CSV export for Xero / Sage |
 | **Stock levels** | See what's in stock, where it is, days of cover | Tracks every unit by delivery and use-by date |

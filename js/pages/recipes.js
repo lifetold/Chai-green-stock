@@ -45,7 +45,9 @@ async function card(main, id) {
         ${r.description ? html`<p>${r.description}</p>` : ''}
         ${r.dietary.length ? html`<p>${r.dietary.map(d => badge('ok', d))}</p>` : ''}</div>
       <div class="card ${r.allergens.length ? 'allergen-card' : ''}"><h2>⚠️ Allergens</h2>
-        ${r.allergens.length ? html`<p class="allergens">${r.allergens.map(a => html`<span>${a}</span>`)}</p>` : html`<p>None listed.</p>`}
+        ${r.allergens.length ? html`<p class="allergens">${r.allergens.map(a => html`<span>${a}</span>`)}</p>` : html`<p>None of the 14 allergens.</p>`}
+        ${(r.may_contain || []).length ? html`<h3>May contain</h3><p class="allergens may">${r.may_contain.map(a => html`<span>${a}</span>`)}</p>
+          <p class="muted">Made in a place that also handles these. Tell anyone with these allergies.</p>` : ''}
         ${r.allergens_confirmed ? html`<p class="muted">Checked against the supplier's product information.</p>`
           : html`<div class="notice warn">Not yet checked against the supplier's product specification. Check the labels before telling a customer.</div>`}</div>
     </div>
@@ -65,15 +67,16 @@ async function card(main, id) {
 }
 
 async function matrix(main) {
-  const rows = await q(sb.from('recipes').select('id, name, category, allergens, allergens_confirmed').eq('active', true).order('category').order('sort_order'));
+  const rows = await q(sb.from('recipes').select('id, name, category, allergens, may_contain, allergens_confirmed').eq('active', true).order('category').order('sort_order'));
   main.innerHTML = html`
     <div class="page-head"><div><a class="no-print" href="#/recipes">← Recipes</a><h1>Allergen chart</h1>
-      <p class="muted">✕ = contains. Always check the recipe card and product labels for a customer with an allergy.</p></div>
+      <p class="muted">✕ = contains · <b>?</b> = may contain (traces). Always check the recipe card and product labels for a customer with an allergy.</p></div>
       <div class="btn-row no-print"><button class="btn" data-print>Print</button></div></div>
     <div class="card"><div class="table-wrap"><table class="matrix">
       <thead><tr><th>Dish</th>${ALLERGENS.map(a => html`<th class="rot"><span>${a}</span></th>`)}</tr></thead>
       <tbody>${rows.map(r => html`<tr><td><a href="#/recipes/${r.id}">${r.name}</a>${r.allergens_confirmed ? '' : raw(' <small class="badge reorder">to confirm</small>')}</td>
-        ${ALLERGENS.map(a => html`<td class="${r.allergens.includes(a) ? 'has' : ''}">${r.allergens.includes(a) ? '✕' : ''}</td>`)}</tr>`)}</tbody></table></div></div>`;
+        ${ALLERGENS.map(a => r.allergens.includes(a) ? raw('<td class="has">✕</td>')
+          : (r.may_contain || []).includes(a) ? raw('<td class="may" title="may contain">?</td>') : raw('<td></td>'))}</tr>`)}</tbody></table></div></div>`;
   main.querySelector('[data-print]').onclick = () => window.print();
 }
 
@@ -86,6 +89,7 @@ function edit(r, done) {
       <label>Portion<input name="portion" value="${r.portion || ''}" placeholder="e.g. 1 slice, 200 g bowl"></label></div>
     <label>Menu description<textarea name="description" rows="2">${r.description || ''}</textarea></label>
     <label>Allergens it contains</label><div class="allergen-pick">${ALLERGENS.map(a => html`<label class="check"><input type="checkbox" name="al" value="${a}" ${(r.allergens || []).includes(a) ? 'checked' : ''}> ${a}</label>`)}</div>
+    <label>May contain <span class="hint">(traces, from the supplier's label)</span></label><div class="allergen-pick">${ALLERGENS.map(a => html`<label class="check"><input type="checkbox" name="may" value="${a}" ${(r.may_contain || []).includes(a) ? 'checked' : ''}> ${a}</label>`)}</div>
     <label class="check"><input type="checkbox" name="allergens_confirmed" ${r.allergens_confirmed ? 'checked' : ''}> Allergens checked against the supplier's product specification</label>
     <label>Suitable for <span class="hint">(comma separated, e.g. V, VG, Halal)</span><input name="dietary" value="${(r.dietary || []).join(', ')}"></label>
     <label>Ingredients <span class="hint">(one per line: name | amount | Brakes code)</span><textarea name="ingredients" rows="6">${ing}</textarea></label>
@@ -103,7 +107,7 @@ function edit(r, done) {
       const rec = {
         name: fd.get('name').trim(), category: fd.get('category').trim(), price: fd.get('price') ? Number(fd.get('price')) : null,
         portion: fd.get('portion').trim() || null, description: fd.get('description').trim() || null,
-        allergens: fd.getAll('al'), allergens_confirmed: fd.has('allergens_confirmed'),
+        allergens: fd.getAll('al'), may_contain: fd.getAll('may').filter(a => !fd.getAll('al').includes(a)), allergens_confirmed: fd.has('allergens_confirmed'),
         dietary: fd.get('dietary').split(',').map(x => x.trim()).filter(Boolean),
         ingredients: lines(fd.get('ingredients')).map(l => { const [name, qty, code] = l.split('|').map(x => x.trim()); return { name, qty: qty || null, code: code || null }; }),
         method: fd.get('method').trim() || null, plating: fd.get('plating').trim() || null, hold_notes: fd.get('hold_notes').trim() || null,

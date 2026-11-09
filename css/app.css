@@ -343,3 +343,6 @@ table.matrix td.has { background: var(--amber-soft); color: var(--red); font-wei
 .basket-bar { position: sticky; bottom: 4.5rem; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
   background: var(--card, #fff); border: 1px solid var(--line); border-radius: 12px; padding: .6rem .8rem; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
 @media (min-width: 900px) { .basket-bar { bottom: 1rem; } }
+
+.allergens.may span { background: var(--bg); border-style: dashed; color: var(--muted); }
+table.matrix td.may { background: var(--bg); color: var(--amber); font-weight: 800; }

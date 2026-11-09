@@ -1548,3 +1548,6 @@ revoke execute on all functions in schema public from public, anon;
 grant execute on all functions in schema public to authenticated;
 revoke execute on function public._move_stock, public._add_photos from authenticated;
 grant execute on function public.keep_alive() to anon;
+
+-- "May contain" (traces) allergens from the supplier's label, shown on recipe cards and the chart.
+alter table public.recipes add column if not exists may_contain text[] not null default '{}';

@@ -1411,3 +1411,140 @@ create or replace function public.keep_alive() returns text
 language sql stable set search_path = public as $$ select 'ok ' || now()::date $$;
 grant execute on function public.keep_alive() to anon;
 
+
+-- ==================================================================
+-- SHOP ORDERS: a store asks the warehouse for stock
+-- ==================================================================
+-- The store (manager or shop device) picks what it needs from the product
+-- list; the warehouse sees the order, packs it and books it out through
+-- Stock out, which raises the invoice and marks the order as sent.
+create table if not exists public.store_orders (
+  id              uuid primary key default gen_random_uuid(),
+  ref             text unique not null default ('SO-' || to_char(now(), 'YYMMDD-') || upper(substr(md5(random()::text), 1, 4))),
+  store_id        uuid not null references public.stores(id),
+  status          text not null default 'submitted' check (status in ('submitted','picking','sent','cancelled')),
+  needed_by       date,
+  notes           text,
+  ordered_by      uuid references public.profiles(id),
+  ordered_by_name text,
+  dispatch_id     uuid references public.dispatches(id),
+  cancel_reason   text,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create index if not exists store_orders_store_idx on public.store_orders (store_id, created_at desc);
+create index if not exists store_orders_status_idx on public.store_orders (status);
+
+create table if not exists public.store_order_lines (
+  id          uuid primary key default gen_random_uuid(),
+  order_id    uuid not null references public.store_orders(id) on delete cascade,
+  product_id  uuid not null references public.products(id),
+  qty         numeric(12,2) not null check (qty > 0),
+  unique (order_id, product_id)
+);
+
+alter table public.store_orders enable row level security;
+alter table public.store_order_lines enable row level security;
+drop policy if exists "view store orders" on public.store_orders;
+create policy "view store orders" on public.store_orders for select to authenticated
+  using (public.is_staff() or (public.my_role() in ('store_manager','store') and store_id = public.my_store()));
+drop policy if exists "view store order lines" on public.store_order_lines;
+create policy "view store order lines" on public.store_order_lines for select to authenticated
+  using (exists (select 1 from public.store_orders o where o.id = order_id
+    and (public.is_staff() or (public.my_role() in ('store_manager','store') and o.store_id = public.my_store()))));
+
+-- Who can order for a store: head office, or that store's own accounts.
+create or replace function public.can_order_store(p_store uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_manager() or (public.my_role() in ('store_manager','store') and p_store = public.my_store())
+$$;
+
+-- What a store can order: names and pack sizes only, never costs or exact stock.
+create or replace function public.order_catalogue()
+returns table (id uuid, name text, category text, unit text, pack_size text, photo_path text, in_stock boolean)
+language sql stable security definer set search_path = public as $$
+  select p.id, p.name, p.category, p.unit, p.pack_size, p.photo_path, p.qty_on_hand > 0
+  from public.products p
+  where p.active and (public.is_staff() or public.my_role() in ('store_manager','store'))
+  order by p.category nulls last, coalesce(p.sort_order, 999999), p.name
+$$;
+
+-- Product names for an order's lines (store accounts can't read products directly).
+create or replace function public.store_order_items(p_order uuid)
+returns table (product_id uuid, name text, unit text, pack_size text, qty numeric, in_stock boolean)
+language sql stable security definer set search_path = public as $$
+  select l.product_id, p.name, p.unit, p.pack_size, l.qty, p.qty_on_hand > 0
+  from public.store_order_lines l
+  join public.store_orders o on o.id = l.order_id
+  join public.products p on p.id = l.product_id
+  where l.order_id = p_order
+    and (public.is_staff() or (public.my_role() in ('store_manager','store') and o.store_id = public.my_store()))
+  order by p.category nulls last, p.name
+$$;
+
+-- p_lines: [{product_id, qty}]
+create or replace function public.place_store_order(p_store uuid, p_lines jsonb, p_needed_by date,
+  p_notes text, p_ordered_by_name text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_ref text;
+begin
+  if not public.can_order_store(p_store) then raise exception 'You can''t order for this store'; end if;
+  if jsonb_array_length(coalesce(p_lines, '[]')) = 0 then raise exception 'Add at least one item'; end if;
+  if nullif(trim(coalesce(p_ordered_by_name, '')), '') is null then raise exception 'Enter your name'; end if;
+  insert into public.store_orders (store_id, needed_by, notes, ordered_by, ordered_by_name)
+  values (p_store, p_needed_by, nullif(trim(coalesce(p_notes, '')), ''), auth.uid(), trim(p_ordered_by_name))
+  returning id, ref into v_id, v_ref;
+  insert into public.store_order_lines (order_id, product_id, qty)
+  select v_id, (x->>'product_id')::uuid, sum((x->>'qty')::numeric)
+  from jsonb_array_elements(p_lines) x
+  join public.products p on p.id = (x->>'product_id')::uuid and p.active
+  group by 1, 2 having sum((x->>'qty')::numeric) > 0;
+  if not found then raise exception 'Add at least one item'; end if;
+  return jsonb_build_object('id', v_id, 'ref', v_ref);
+end $$;
+
+-- Warehouse marks an order as being packed.
+create or replace function public.start_picking_store_order(p_order uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.require_staff();
+  update public.store_orders set status = 'picking', updated_at = now() where id = p_order and status = 'submitted';
+  if not found then raise exception 'This order isn''t waiting to be packed'; end if;
+end $$;
+
+-- After Stock out books the order out: link the delivery and mark it sent.
+create or replace function public.mark_store_order_sent(p_order uuid, p_dispatch uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.require_staff();
+  update public.store_orders o set status = 'sent', dispatch_id = p_dispatch, updated_at = now()
+  where o.id = p_order and o.status in ('submitted','picking')
+    and exists (select 1 from public.dispatches d where d.id = p_dispatch and d.store_id = o.store_id);
+  if not found then raise exception 'Couldn''t mark the shop order as sent'; end if;
+end $$;
+
+-- The store can cancel until the warehouse starts packing; head office any time before it's sent.
+create or replace function public.cancel_store_order(p_order uuid, p_reason text) returns void
+language plpgsql security definer set search_path = public as $$
+declare o public.store_orders;
+begin
+  select * into o from public.store_orders where id = p_order for update;
+  if not found then raise exception 'Order not found'; end if;
+  if o.status in ('sent','cancelled') then raise exception 'This order is already %', o.status; end if;
+  if not (public.is_staff() or (public.can_order_store(o.store_id) and o.status = 'submitted')) then
+    raise exception 'The warehouse has started packing this order. Call them to change it.';
+  end if;
+  update public.store_orders set status = 'cancelled', cancel_reason = nullif(trim(coalesce(p_reason, '')), ''), updated_at = now()
+  where id = p_order;
+end $$;
+
+-- Badge count for the warehouse menu.
+create or replace function public.open_store_orders() returns int
+language sql stable security definer set search_path = public as $$
+  select case when public.is_staff() then (select count(*)::int from public.store_orders where status in ('submitted','picking')) else 0 end
+$$;
+
+revoke execute on all functions in schema public from public, anon;
+grant execute on all functions in schema public to authenticated;
+revoke execute on function public._move_stock, public._add_photos from authenticated;
+grant execute on function public.keep_alive() to anon;

@@ -25,13 +25,15 @@ const ROUTES = {
   'recipes':         () => import('./pages/recipes.js'),
   'manual':          () => import('./pages/manual.js'),
   'team':            () => import('./pages/team.js'),
-  'check-setup':     () => import('./pages/check-setup.js')
+  'check-setup':     () => import('./pages/check-setup.js'),
+  'orders':          () => import('./pages/orders.js')
 };
 
 const NAV = [
   ['Daily work'],
   ['', '🏠', 'Dashboard'],
   ['goods-in', '📥', 'Goods in'],
+  ['orders', '🛒', 'Shop orders', 'orders'],
   ['dispatch', '📤', 'Stock out'],
   ['stock-check', '✅', 'Stock check'],
   ['stock-take', '📋', 'Full stock take'],
@@ -63,6 +65,7 @@ const NAV = [
 const STORE_NAV = [
   ['My store'],
   ['checks', '✔️', "Today's checks"],
+  ['orders', '🛒', 'Order stock'],
   ['records', '🗂️', 'Safety records'],
   ['recipes', '🍰', 'Recipes & allergens'],
   ['manual', '📘', 'Operations manual'],
@@ -211,6 +214,7 @@ function renderShell() {
     </div>
     <nav class="quickbar">${home ? html`
       <a href="#/checks" data-route="checks"><span class="ico">✔️</span>Checks</a>
+      ${role === 'inspector' ? '' : html`<a href="#/orders" data-route="orders"><span class="ico">🛒</span>Order</a>`}
       <a href="#/records" data-route="records"><span class="ico">🗂️</span>Records</a>
       ${role === 'inspector' ? '' : html`<a href="#/recipes" data-route="recipes"><span class="ico">🍰</span>Recipes</a>
       <a href="#/manual" data-route="manual"><span class="ico">📘</span>Manual</a>`}` : html`
@@ -236,6 +240,7 @@ export async function refreshCounts() {
   try {
     const s = await q(sb.rpc('dashboard_summary'));
     setCount('reorder', s?.to_reorder);
+    setCount('orders', await q(sb.rpc('open_store_orders')).catch(() => 0));
     setCount('users', isAdmin() ? s?.pending_users : 0);
   } catch (e) { /* not critical */ }
 }
@@ -252,7 +257,7 @@ async function route() {
   document.body.classList.remove('nav-open');
   let [name, ...params] = location.hash.replace(/^#\/?/, '').split('/');
   const home = STORE_HOME[state.profile.role];
-  const STORE_PAGES = ['checks', 'records', 'recipes', 'manual', 'team'];
+  const STORE_PAGES = ['checks', 'orders', 'records', 'recipes', 'manual', 'team'];
   if (home && !STORE_PAGES.includes(name.split('?')[0])) name = home;
   if (state.profile.role === 'inspector' && !['records', 'recipes'].includes(name.split('?')[0])) name = 'records';
   const key = name.split('?')[0];

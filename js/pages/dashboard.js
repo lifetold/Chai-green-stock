@@ -1,7 +1,7 @@
 import { sb, q, rpc, state, html, money, num, date, dateTime, badge, isManager } from '../lib.js';
 
 export async function render(main) {
-  const [s, low, rota, recent, expiring] = await Promise.all([
+  const [s, low, rota, recent, expiring, shopOrders] = await Promise.all([
     rpc('dashboard_summary'),
     q(sb.from('product_stock').select('id, name, qty_on_hand, unit, eff_reorder_point, on_order, stock_status, supplier_name, lead_days')
       .in('stock_status', ['out', 'reorder']).order('qty_on_hand').limit(8)),
@@ -11,7 +11,8 @@ export async function render(main) {
     q(sb.from('stock_batches').select('qty_remaining, expiry_date, products(id, name, unit)')
       .gt('qty_remaining', 0).not('expiry_date', 'is', null)
       .lte('expiry_date', new Date(Date.now() + state.settings.expiry_warning_days * 864e5).toISOString().slice(0, 10))
-      .order('expiry_date').limit(8))
+      .order('expiry_date').limit(8)),
+    rpc('open_store_orders').catch(() => 0)
   ]);
   const week = rota[0];
   const mine = week?.assigned_to === state.profile.id;
@@ -24,6 +25,9 @@ export async function render(main) {
         <a class="btn primary" href="#/goods-in">📥 Goods in</a>
         <a class="btn primary" href="#/dispatch">📤 Stock out</a>
       </div></div>
+
+    ${shopOrders ? html`<div class="notice warn">🛒 <b>${shopOrders}</b> shop order${shopOrders === 1 ? ' is' : 's are'} waiting to be packed.
+      <a href="#/orders">Open shop orders</a></div>` : ''}
 
     ${week && week.status !== 'approved' ? html`<div class="notice ${mine ? 'warn' : ''}">
       ✅ This week's stock check (${num(week.product_count)} products) is

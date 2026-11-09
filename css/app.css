@@ -75,7 +75,7 @@ main { flex: 1; min-width: 0; padding: 1.25rem; max-width: 1100px; }
 .quickbar { display: none; }
 @media (max-width: 820px) {
   .quickbar {
-    display: grid; grid-template-columns: repeat(4, 1fr);
+    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
     background: var(--card); border-top: 1px solid var(--line);
     padding-bottom: env(safe-area-inset-bottom);
@@ -337,3 +337,9 @@ table.matrix td.has { background: var(--amber-soft); color: var(--red); font-wei
 .manual-page h3 { margin-top: 1.2rem; }
 @media (max-width: 760px) { .manual { grid-template-columns: 1fr; } .check-card { flex-wrap: wrap; } }
 @media print { .manual { display: block; } .runner { max-width: none; } }
+
+/* shop orders */
+.order-list li.picked { background: var(--green-soft); margin: 0 -.5rem; padding-left: .5rem; padding-right: .5rem; border-radius: 8px; }
+.basket-bar { position: sticky; bottom: 4.5rem; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  background: var(--card, #fff); border: 1px solid var(--line); border-radius: 12px; padding: .6rem .8rem; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+@media (min-width: 900px) { .basket-bar { bottom: 1rem; } }

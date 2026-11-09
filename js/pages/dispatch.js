@@ -4,6 +4,7 @@ import { sb, q, rpc, state, html, raw, money, num, scanner, photoPicker, signatu
   busy, fail, toast, hydratePhotos, onLeave, badge } from '../lib.js';
 import { pickProduct, stepper, bindSteppers, thumb } from '../widgets.js';
 import { refreshCounts } from '../app.js';
+import { orderForDispatch } from './orders.js';
 
 // Same rule as price_for() in the database (the database has the final say).
 export function priceFor(product, store, settings) {
@@ -20,6 +21,17 @@ export async function render(main, params) {
   const stores = await q(sb.from('stores').select('*').eq('active', true).order('name'));
   const lines = [];   // { product, qty }
   const S = state.settings;
+  // Booking out a shop order: start with what the shop asked for.
+  let order = null;
+  if (params[1]) {
+    const o = await orderForDispatch(params[1]);
+    order = o.order;
+    if (!['submitted', 'picking'].includes(order.status)) {
+      main.innerHTML = html`<div class="notice warn">Shop order ${order.ref} has already been ${order.status}.</div>`;
+      return;
+    }
+    lines.push(...o.lines);
+  }
 
   if (!stores.length) {
     main.innerHTML = html`<h1>Stock out</h1><div class="notice warn">Add your stores first.
@@ -29,6 +41,8 @@ export async function render(main, params) {
 
   main.innerHTML = html`
     <div class="page-head"><div><h1>Stock out</h1><p class="muted">Scan everything going to the store. An invoice is raised when you book it out.</p></div></div>
+    ${order ? html`<div class="notice">🛒 Packing shop order <b>${order.ref}</b>. The items it asked for are listed below: change any quantity you can't send in full.
+      ${order.notes ? html`<br>📝 ${order.notes}` : ''}</div>` : ''}
     <div class="card">
       <label>Going to<select name="store"><option value="">— choose store —</option>
         ${stores.map(s => html`<option value="${s.id}" ${s.id === params[0] ? 'selected' : ''}>${s.name}${s.code ? ' (' + s.code + ')' : ''} — ${s.type === 'company' ? 'company owned' : 'franchise'}</option>`)}
@@ -53,7 +67,7 @@ export async function render(main, params) {
       </div>
       <label>Signature</label>
       <div data-sig></div>
-      <label>Notes<textarea name="notes"></textarea></label>
+      <label>Notes<textarea name="notes">${order ? 'Shop order ' + order.ref : ''}</textarea></label>
     </div>
     <button class="btn primary big" data-save>Book out &amp; raise invoice</button>`;
 
@@ -136,14 +150,15 @@ export async function render(main, params) {
         p_method: $('[name=method]').value, p_collected_by: who, p_signature_path: sigPath,
         p_notes: $('[name=notes]').value, p_photo_paths: photos.paths()
       });
+      if (order) await rpc('mark_store_order_sent', { p_order: order.id, p_dispatch: res.dispatch_id }).catch(fail);
       refreshCounts();
-      main.innerHTML = html`<div class="card"><div class="notice ok">✅ Booked out to <b>${s.name}</b>.
+      main.innerHTML = html`<div class="card"><div class="notice ok">✅ Booked out to <b>${s.name}</b>.${order ? ` Shop order ${order.ref} marked as sent.` : ''}
         Delivery note <b>${res.dispatch_ref}</b>, invoice <b>${res.invoice_number}</b> raised.</div>
         <div class="btn-row">
           <a class="btn primary" href="#/invoices/${res.invoice_id}">View / send invoice</a>
           <a class="btn" href="#/dispatches/${res.dispatch_id}">Delivery note</a>
           <button class="btn" data-again>Book out another</button></div></div>`;
-      main.querySelector('[data-again]').onclick = () => render(main, []);
+      main.querySelector('[data-again]').onclick = () => { if (location.hash === '#/dispatch') render(main, []); else location.hash = '#/dispatch'; };
       // stock held by a logistics company: send them the pick-and-deliver order
       const byCo = {};
       lines.filter(l => l.product.stored_by).forEach(l => (byCo[l.product.stored_by] ||= []).push(l));

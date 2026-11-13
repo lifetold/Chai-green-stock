@@ -24,6 +24,8 @@ export async function render(main) {
       ${f('safety_stock_days', 'Safety stock (days)', 'type="number" min="0" required', 'extra cover on top of lead time')}
       ${f('expiry_warning_days', 'Warn about use-by dates within (days)', 'type="number" min="1" required')}</div>
       ${f('alert_emails', 'Daily reorder email to', '', 'comma separated; needs the email set-up in README')}</div>
+    <div class="card"><h2>Marketing</h2>
+      ${f('marketing_email', 'Marketing requests are emailed to', 'type="email"', 'the marketing team')}</div>
     <div class="card"><h2>Weekly stock check</h2><div class="grid three">
       ${f('check_cycle_weeks', 'Count every product every … weeks', 'type="number" min="1" max="52" required')}
       <label>Week starts on<select name="check_day">${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((d, i) => html`<option value="${i + 1}" ${s.check_day === i + 1 ? 'selected' : ''}>${d}</option>`)}</select></label></div>

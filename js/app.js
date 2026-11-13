@@ -26,7 +26,8 @@ const ROUTES = {
   'manual':          () => import('./pages/manual.js'),
   'team':            () => import('./pages/team.js'),
   'check-setup':     () => import('./pages/check-setup.js'),
-  'orders':          () => import('./pages/orders.js')
+  'orders':          () => import('./pages/orders.js'),
+  'marketing':       () => import('./pages/marketing.js')
 };
 
 const NAV = [
@@ -46,6 +47,8 @@ const NAV = [
   ['manual', '📘', 'Operations manual', null, 'manager'],
   ['team', '🧑‍🍳', 'Store teams', null, 'manager'],
   ['check-setup', '🛠️', 'Checklists', null, 'manager'],
+  ['Marketing', null, null, null, 'manager'],
+  ['marketing', '📣', 'Marketing', 'marketing', 'manager'],
   ['Stock'],
   ['stock', '📦', 'Products & stock'],
   ['reorder', '🔔', 'Reorder', 'reorder'],
@@ -69,7 +72,9 @@ const STORE_NAV = [
   ['records', '🗂️', 'Safety records'],
   ['recipes', '🍰', 'Recipes & allergens'],
   ['manual', '📘', 'Operations manual'],
-  ['team', '🧑‍🍳', 'Store team', null, 'store_manager']
+  ['team', '🧑‍🍳', 'Store team', null, 'store_manager'],
+  ['Marketing'],
+  ['marketing', '📣', 'Campaigns, requests & images']
 ];
 const INSPECTOR_NAV = [
   ['Inspection'],
@@ -241,6 +246,7 @@ export async function refreshCounts() {
     const s = await q(sb.rpc('dashboard_summary'));
     setCount('reorder', s?.to_reorder);
     setCount('orders', await q(sb.rpc('open_store_orders')).catch(() => 0));
+    if (isManager()) setCount('marketing', await q(sb.rpc('open_marketing_requests')).catch(() => 0));
     setCount('users', isAdmin() ? s?.pending_users : 0);
   } catch (e) { /* not critical */ }
 }
@@ -257,7 +263,7 @@ async function route() {
   document.body.classList.remove('nav-open');
   let [name, ...params] = location.hash.replace(/^#\/?/, '').split('/');
   const home = STORE_HOME[state.profile.role];
-  const STORE_PAGES = ['checks', 'orders', 'records', 'recipes', 'manual', 'team'];
+  const STORE_PAGES = ['checks', 'orders', 'records', 'recipes', 'manual', 'team', 'marketing'];
   if (home && !STORE_PAGES.includes(name.split('?')[0])) name = home;
   if (state.profile.role === 'inspector' && !['records', 'recipes'].includes(name.split('?')[0])) name = 'records';
   const key = name.split('?')[0];

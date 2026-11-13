@@ -30,6 +30,11 @@ See README.md for features and setup, and docs/PROJECT-HISTORY.md for everything
   and invoice counter before seeding are in `sample.products_before`, `sample.batches_before`,
   `sample.settings_before`, so it can all be removed exactly when the user is ready to go live.
   Check history was topped up to 9 Nov and 5 sample shop orders added (also in `sample.rows`).
+- Marketing (13 Nov 2026): marketing_campaigns / marketing_requests / marketing_images, private storage
+  bucket `marketing`, RPCs place_marketing_request, marketing_email_payload, mark_marketing_emailed,
+  open_marketing_requests; page js/pages/marketing.js; emails via api/marketing-email.js (Resend, uses the
+  user's JWT, no service role). Needs RESEND_API_KEY + MARKETING_FROM on Vercel. Requests go to
+  settings.marketing_email (social@chaigreen1823.com). Local test: scratchpad e2e/ (14 checks pass).
 - Shop orders (9 Nov 2026): store_orders/store_order_lines, RPCs place_store_order,
   order_catalogue, store_order_items, start_picking_store_order, mark_store_order_sent,
   cancel_store_order, open_store_orders; page js/pages/orders.js; Stock out takes

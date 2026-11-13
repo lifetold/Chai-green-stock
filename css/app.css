@@ -346,3 +346,29 @@ table.matrix td.has { background: var(--amber-soft); color: var(--red); font-wei
 
 .allergens.may span { background: var(--bg); border-style: dashed; color: var(--muted); }
 table.matrix td.may { background: var(--bg); color: var(--amber); font-weight: 800; }
+
+/* Marketing */
+.campaign { display: flex; gap: 1rem; padding: 0; overflow: hidden; margin-bottom: 1rem; }
+.campaign-img { width: 220px; max-width: 38%; object-fit: cover; cursor: zoom-in; background: #eee; }
+.campaign-body { padding: 1rem 1.1rem; flex: 1; min-width: 0; }
+.campaign-body h2 { margin: .3rem 0 .4rem; }
+.campaign-top { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.campaign-foot { margin-top: .8rem; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: .6rem; }
+.badge.campaign { background: #e3efe6; color: #1f5a33; }
+.badge.promotion { background: #fdf0d6; color: #7a5200; }
+.badge.pr { background: #e6ecf7; color: #29457a; }
+.bad-text { color: #a33; font-weight: 600; }
+details.past { margin-top: 1.5rem; }
+details.past summary { cursor: pointer; color: var(--muted); margin-bottom: .8rem; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: #f6f7f5; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+.gal { margin: 0; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.gal img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #eee; cursor: zoom-in; }
+.gal figcaption { padding: .6rem .7rem .7rem; display: flex; flex-direction: column; gap: .2rem; }
+.gal .btn-row { margin-top: .4rem; }
+@media (max-width: 640px) { .campaign { flex-direction: column; } .campaign-img { width: 100%; max-width: none; height: 180px; } }
+.badge.part { background: #e6ecf7; color: #29457a; border-color: #b9c8e6; }
+.campaign-text p { margin: .3rem 0; }
+.campaign-text ul, .campaign-text ol { margin: .3rem 0; padding-left: 1.3rem; }
+.campaign-text h3 { margin: .7rem 0 .2rem; font-size: 1rem; }

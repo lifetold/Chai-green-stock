@@ -10,6 +10,7 @@ screen ("Add to Home Screen" / "Install app").
 | --- | --- | --- |
 | **Goods in** | Scan each item off the delivery, photograph the delivery and paperwork, enter use-by dates | Adds stock, records cost, books it against the purchase order. **An unknown barcode opens a "new product" form: photograph the packaging, name it, and the barcode is linked to it from then on.** |
 | **Shop orders** | Shops pick what they need from the product list (no costs shown); the warehouse packs it | New orders show on the dashboard and menu badge. "Book out with Stock out" fills in the lines; booking out raises the invoice and marks the order as sent. Shops can cancel until packing starts |
+| **Marketing** | Head office posts upcoming campaigns, promotions and PR; stores send marketing requests (name, phone, email, date wanted, what it's for, the aim, notes); a gallery of pre-approved images to download | Saving a new campaign emails every franchise store (store email plus franchise store logins, one email each). Requests are emailed to Settings → marketing email (social@chaigreen1823.com), with reply-to set to the franchisee. Head office sets each request's status and reply; the menu badge counts new requests. Inspectors don't see Marketing |
 | **Stock out** | Choose the store, scan everything going, photograph it, get the collector's name and signature | Takes it off stock (earliest use-by first), raises the **invoice** and a delivery note |
 | **Invoices** | Print / save PDF, email to the store, mark paid, void | Company-owned stores pay **cost**. Franchise stores pay **cost + margin**: the store's agreed margin if it has one, otherwise the product's margin, otherwise the default. Sequential numbers, VAT per product, CSV export for Xero / Sage |
 | **Stock levels** | See what's in stock, where it is, days of cover | Tracks every unit by delivery and use-by date |
@@ -75,3 +76,17 @@ Add these in Vercel → Project → Settings → Environment Variables, then red
 
 Then put the recipients in **Settings → Daily reorder email to**. The email goes out at 07:00 UTC
 when something needs reordering, is going out of date, is late or is overdue.
+
+### 5. Marketing emails
+
+New campaigns and marketing requests are emailed by `api/marketing-email.js`. It uses the signed-in
+user's own login (the database checks who may send what, and each item is emailed only once), so it
+needs no service_role key. Add in Vercel → Environment Variables, then redeploy:
+
+| Variable | Value |
+| --- | --- |
+| `RESEND_API_KEY` | from [resend.com](https://resend.com) |
+| `MARKETING_FROM` | e.g. `Chai Green Marketing <social@chaigreen1823.com>` (chaigreen1823.com verified in Resend) |
+
+Until the key is set, everything is still saved in the app and head office sees "Not emailed yet"
+with an **Email franchisees now** button on each campaign.

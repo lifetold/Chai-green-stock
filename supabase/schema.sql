@@ -1551,3 +1551,193 @@ grant execute on function public.keep_alive() to anon;
 
 -- "May contain" (traces) allergens from the supplier's label, shown on recipe cards and the chart.
 alter table public.recipes add column if not exists may_contain text[] not null default '{}';
+
+-- ============================================================== MARKETING
+-- Upcoming campaigns and promotions (head office posts them and every
+-- franchise store is emailed), marketing requests from stores (emailed to the
+-- marketing team), and a gallery of pre-approved images to download.
+alter table public.settings add column if not exists marketing_email text default 'social@chaigreen1823.com';
+
+create table if not exists public.marketing_campaigns (
+  id          uuid primary key default gen_random_uuid(),
+  kind        text not null default 'campaign' check (kind in ('campaign','promotion','pr')),
+  title       text not null,
+  details     text not null default '',
+  starts_on   date,
+  ends_on     date,
+  image_path  text,
+  created_by  uuid references public.profiles(id) default auth.uid(),
+  created_by_name text,
+  emailed_at  timestamptz,
+  emailed_to  int,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists public.marketing_requests (
+  id              uuid primary key default gen_random_uuid(),
+  ref             text unique,
+  store_id        uuid references public.stores(id),
+  franchisee_name text not null,
+  phone           text not null,
+  email           text not null,
+  wanted_by       date not null,
+  what_for        text not null,
+  aim             text not null,
+  notes           text not null default '',
+  status          text not null default 'new' check (status in ('new','in_progress','done','declined')),
+  reply           text not null default '',
+  created_by      uuid references public.profiles(id) default auth.uid(),
+  emailed_at      timestamptz,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create table if not exists public.marketing_images (
+  id          uuid primary key default gen_random_uuid(),
+  title       text not null,
+  category    text not null default 'General',
+  path        text not null,
+  thumb_path  text,
+  file_name   text,
+  size_bytes  bigint,
+  notes       text not null default '',
+  created_by  uuid references public.profiles(id) default auth.uid(),
+  created_at  timestamptz not null default now()
+);
+
+alter table public.marketing_campaigns enable row level security;
+alter table public.marketing_requests  enable row level security;
+alter table public.marketing_images    enable row level security;
+
+-- Who can use the marketing section: head office and store accounts (not inspectors).
+create or replace function public.can_use_marketing() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(public.my_role() in ('admin','manager','store_manager','store'), false)
+$$;
+
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'marketing_campaigns' and policyname = 'marketing read campaigns') then
+    create policy "marketing read campaigns" on public.marketing_campaigns for select to authenticated using (public.can_use_marketing());
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'marketing_campaigns' and policyname = 'managers write campaigns') then
+    create policy "managers write campaigns" on public.marketing_campaigns for all to authenticated
+      using (public.is_manager()) with check (public.is_manager());
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'marketing_requests' and policyname = 'read own or all requests') then
+    create policy "read own or all requests" on public.marketing_requests for select to authenticated
+      using (public.is_manager() or (public.my_role() in ('store_manager','store') and store_id = public.my_store()));
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'marketing_requests' and policyname = 'managers update requests') then
+    create policy "managers update requests" on public.marketing_requests for update to authenticated
+      using (public.is_manager()) with check (public.is_manager());
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'marketing_requests' and policyname = 'managers delete requests') then
+    create policy "managers delete requests" on public.marketing_requests for delete to authenticated using (public.is_manager());
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'marketing_images' and policyname = 'marketing read images') then
+    create policy "marketing read images" on public.marketing_images for select to authenticated using (public.can_use_marketing());
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'marketing_images' and policyname = 'managers write images') then
+    create policy "managers write images" on public.marketing_images for all to authenticated
+      using (public.is_manager()) with check (public.is_manager());
+  end if;
+end $$;
+
+-- Stores send requests through this function so the store, reference and
+-- requester are filled in on the server.
+create or replace function public.place_marketing_request(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_store uuid; v_id uuid := gen_random_uuid(); v_ref text;
+begin
+  if not public.can_use_marketing() then raise exception 'You can''t send marketing requests.'; end if;
+  v_store := case when public.is_manager() then nullif(p->>'store_id','')::uuid else public.my_store() end;
+  if public.my_role() in ('store_manager','store') and v_store is null then
+    raise exception 'Your login isn''t linked to a store yet. Ask head office to link it.';
+  end if;
+  if coalesce(trim(p->>'franchisee_name'),'') = '' or coalesce(trim(p->>'phone'),'') = '' or coalesce(trim(p->>'email'),'') = ''
+     or coalesce(p->>'wanted_by','') = '' or coalesce(trim(p->>'what_for'),'') = '' or coalesce(trim(p->>'aim'),'') = '' then
+    raise exception 'Please fill in every box (notes are optional).';
+  end if;
+  if (p->>'wanted_by')::date < current_date then raise exception 'The date you need it by is in the past.'; end if;
+  v_ref := 'MR-' || to_char(now(), 'YYMMDD') || '-' || upper(substr(replace(v_id::text, '-', ''), 1, 4));
+  insert into public.marketing_requests (id, ref, store_id, franchisee_name, phone, email, wanted_by, what_for, aim, notes)
+  values (v_id, v_ref, v_store, trim(p->>'franchisee_name'), trim(p->>'phone'), trim(p->>'email'), (p->>'wanted_by')::date,
+          trim(p->>'what_for'), trim(p->>'aim'), coalesce(trim(p->>'notes'),''));
+  return jsonb_build_object('id', v_id, 'ref', v_ref);
+end $$;
+
+-- What the email function needs. Only head office can get a campaign's
+-- recipient list, only once (until it is marked sent); a request can be
+-- emailed by whoever sent it, once.
+create or replace function public.marketing_email_payload(p_kind text, p_id uuid) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare c record; r record; v_to text[];
+begin
+  if p_kind = 'campaign' then
+    if not public.is_manager() then raise exception 'Only head office can email campaigns.'; end if;
+    select * into c from public.marketing_campaigns where id = p_id;
+    if not found then raise exception 'Campaign not found.'; end if;
+    select array_agg(distinct lower(e)) into v_to from (
+      select trim(s.email) e from public.stores s where s.active and s.type = 'franchise' and coalesce(trim(s.email),'') <> ''
+      union
+      select trim(pr.email) from public.profiles pr join public.stores s on s.id = pr.store_id
+       where pr.active and pr.role in ('store_manager','store') and s.active and s.type = 'franchise' and coalesce(trim(pr.email),'') <> ''
+    ) x where e like '%@%' and e not like '%@example.com';
+    return jsonb_build_object('kind', 'campaign', 'already_sent', c.emailed_at is not null, 'to', coalesce(to_jsonb(v_to), '[]'::jsonb),
+      'item', to_jsonb(c));
+  elsif p_kind = 'request' then
+    select * into r from public.marketing_requests where id = p_id;
+    if not found or not (public.is_manager() or r.created_by = auth.uid()) then raise exception 'Request not found.'; end if;
+    return jsonb_build_object('kind', 'request', 'already_sent', r.emailed_at is not null,
+      'to', jsonb_build_array(coalesce(nullif(trim((select marketing_email from public.settings where id = 1)),''), 'social@chaigreen1823.com')),
+      'item', to_jsonb(r) || jsonb_build_object('store_name', (select name from public.stores where id = r.store_id)));
+  end if;
+  raise exception 'Unknown kind';
+end $$;
+
+create or replace function public.mark_marketing_emailed(p_kind text, p_id uuid, p_count int) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if p_kind = 'campaign' and public.is_manager() then
+    update public.marketing_campaigns set emailed_at = now(), emailed_to = p_count where id = p_id;
+  elsif p_kind = 'request' then
+    update public.marketing_requests set emailed_at = now() where id = p_id and (public.is_manager() or created_by = auth.uid());
+  end if;
+end $$;
+
+create or replace function public.open_marketing_requests() returns int
+language sql stable security definer set search_path = public as $$
+  select case when public.is_manager() then (select count(*)::int from public.marketing_requests where status = 'new') else 0 end
+$$;
+
+-- Images: a private bucket. Everyone who uses marketing can download;
+-- only head office can upload or delete.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('marketing', 'marketing', false, 26214400)
+on conflict (id) do nothing;
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'objects' and policyname = 'marketing read files') then
+    create policy "marketing read files" on storage.objects for select to authenticated
+      using (bucket_id = 'marketing' and public.can_use_marketing());
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'objects' and policyname = 'managers upload marketing files') then
+    create policy "managers upload marketing files" on storage.objects for insert to authenticated
+      with check (bucket_id = 'marketing' and public.is_manager());
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'objects' and policyname = 'managers delete marketing files') then
+    create policy "managers delete marketing files" on storage.objects for delete to authenticated
+      using (bucket_id = 'marketing' and public.is_manager());
+  end if;
+end $$;
+
+revoke execute on function public.place_marketing_request(jsonb) from public, anon;
+revoke execute on function public.marketing_email_payload(text, uuid) from public, anon;
+revoke execute on function public.mark_marketing_emailed(text, uuid, int) from public, anon;
+revoke execute on function public.open_marketing_requests() from public, anon;
+revoke execute on function public.can_use_marketing() from public, anon;
+grant execute on function public.place_marketing_request(jsonb) to authenticated;
+grant execute on function public.marketing_email_payload(text, uuid) to authenticated;
+grant execute on function public.mark_marketing_emailed(text, uuid, int) to authenticated;
+grant execute on function public.open_marketing_requests() to authenticated;
+grant execute on function public.can_use_marketing() to authenticated;
+grant select, insert, update, delete on public.marketing_campaigns, public.marketing_requests, public.marketing_images to authenticated;

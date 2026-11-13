@@ -74,7 +74,7 @@ const STORE_NAV = [
   ['manual', '📘', 'Operations manual'],
   ['team', '🧑‍🍳', 'Store team', null, 'store_manager'],
   ['Marketing'],
-  ['marketing', '📣', 'Campaigns, requests & images']
+  ['marketing', '📣', 'Campaigns, requests & images', 'marketing']
 ];
 const INSPECTOR_NAV = [
   ['Inspection'],
@@ -241,6 +241,14 @@ function renderShell() {
 
 // Little number badges in the menu (things needing attention).
 export async function refreshCounts() {
+  if (['store_manager', 'store'].includes(state.profile.role)) {
+    // New campaigns since this person last looked at Marketing on this device.
+    let seen = '1970-01-01';
+    try { seen = localStorage.getItem('cg-marketing-seen') || seen; } catch (e) { /* private mode */ }
+    const { count } = await sb.from('marketing_campaigns').select('id', { count: 'exact', head: true }).gt('created_at', seen);
+    setCount('marketing', count || 0);
+    return;
+  }
   if (!isManager() && state.profile.role !== 'staff') return;
   try {
     const s = await q(sb.rpc('dashboard_summary'));

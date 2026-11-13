@@ -53,7 +53,7 @@ module.exports = async (req, res) => {
     if (!to.length) return res.status(200).json({ ok: true, sent: false, reason: kind === 'campaign'
       ? 'No franchise store has an email address yet. Add them under Stores, then press "Email franchisees now".'
       : 'No marketing email address is set in Settings.' });
-    if (!process.env.RESEND_API_KEY) return res.status(200).json({ ok: true, sent: false, reason: 'Email sending is not switched on yet.' });
+    if (!process.env.RESEND_API_KEY) return res.status(200).json({ ok: true, sent: false, reason: 'Email sending is not switched on yet.', setup: false });
 
     const site = `https://${req.headers.host}`;
     const it = p.item;

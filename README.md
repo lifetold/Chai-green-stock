@@ -88,5 +88,7 @@ needs no service_role key. Add in Vercel → Environment Variables, then redeplo
 | `RESEND_API_KEY` | from [resend.com](https://resend.com) |
 | `MARKETING_FROM` | e.g. `Chai Green Marketing <social@chaigreen1823.com>` (chaigreen1823.com verified in Resend) |
 
-Until the key is set, everything is still saved in the app and head office sees "Not emailed yet"
-with an **Email franchisees now** button on each campaign.
+Without the key (the current set-up: nobody can change the chaigreen1823.com DNS), the app opens the
+person's own email app with everything filled in: a new campaign goes to every franchise store in BCC,
+a request goes to the marketing address. They just press Send. Stores also see a number on Marketing
+for campaigns they haven't looked at yet.

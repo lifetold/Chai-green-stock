@@ -41,10 +41,45 @@ export async function sendEmail(kind, id) {
     });
     const j = await r.json().catch(() => ({}));
     if (j.sent) return { ok: true, msg: kind === 'campaign' ? `Emailed to ${j.count} franchise ${j.count === 1 ? 'address' : 'addresses'}.` : 'The marketing team has been emailed.' };
-    return { ok: false, msg: j.reason || j.error || 'The email could not be sent.' };
+    return { ok: false, manual: j.setup === false || !r.ok, msg: j.reason || j.error || 'The email could not be sent.' };
   } catch (e) {
-    return { ok: false, msg: 'The email could not be sent (no connection).' };
+    return { ok: false, manual: true, msg: 'The email could not be sent (no connection).' };
   }
+}
+
+// When the app can't send by itself: open the person's own email app with
+// everything filled in, so they only press Send.
+function mailto({ to = [], bcc = [], subject, body }) {
+  const qs = [bcc.length ? 'bcc=' + encodeURIComponent(bcc.join(',')) : '', 'subject=' + encodeURIComponent(subject), 'body=' + encodeURIComponent(body)].filter(Boolean).join('&');
+  return 'mailto:' + to.map(encodeURIComponent).join(',') + '?' + qs;
+}
+const appLink = () => location.origin + '/#/marketing';
+const whenText = c => c.starts_on && c.ends_on ? `${date(c.starts_on)} to ${date(c.ends_on)}` : c.starts_on ? `From ${date(c.starts_on)}` : c.ends_on ? `Until ${date(c.ends_on)}` : '';
+
+export async function emailByHand(kind, id, done) {
+  const p = await rpc('marketing_email_payload', { p_kind: kind, p_id: id });
+  const it = p.item;
+  const to = (p.to || []);
+  if (!to.length) return toast(kind === 'campaign' ? 'No franchise store has an email address yet. Add them under Stores first.' : 'No marketing email address is set in Settings.', 'bad');
+  let link, title, intro;
+  if (kind === 'campaign') {
+    const details = it.details.length > 1200 ? it.details.slice(0, 1200) + '…' : it.details;
+    link = mailto({ bcc: to, subject: `New ${(KIND[it.kind] || 'campaign').toLowerCase()}: ${it.title}`,
+      body: `Hi all,\n\nNew ${(KIND[it.kind] || 'campaign').toLowerCase()} from head office: ${it.title}\n${whenText(it)}\n\n${details.replace(/^## /gm, '').replace(/^- /gm, '• ')}\n\nFull details and images in the Chai Green app: ${appLink()}\n` });
+    title = 'Email the franchisees';
+    intro = html`<p>Press the button to open your email with this campaign written out and all <b>${to.length}</b> franchise store addresses filled in (hidden from each other). Then just press <b>Send</b>.</p>`;
+  } else {
+    link = mailto({ to, subject: `Marketing request ${it.ref}: ${it.store_name || 'Head office'}`,
+      body: `Marketing request ${it.ref}\n\nStore: ${it.store_name || 'Head office'}\nFranchisee: ${it.franchisee_name}\nPhone: ${it.phone}\nEmail: ${it.email}\nWanted by: ${date(it.wanted_by)}\n\nWhat it's for:\n${it.what_for}\n\nThe aim:\n${it.aim}\n${it.notes ? '\nNotes:\n' + it.notes + '\n' : ''}\nAlso in the Chai Green app: ${appLink()}\n` });
+    title = 'Email the marketing team';
+    intro = html`<p>Your request is saved and the marketing team can see it in the app. To make sure they notice it, press the button: your email opens with the request written out to <b>${to[0]}</b>. Then just press <b>Send</b>.</p>`;
+  }
+  const m = modal(title, html`${intro}<div class="actions"><button class="btn" data-skip>Not now</button><a class="btn primary big" href="${link}" data-go>Open my email</a></div>`);
+  m.el.querySelector('[data-skip]').onclick = () => { m.close(); done && done(); };
+  m.el.querySelector('[data-go]').onclick = async () => {
+    await rpc('mark_marketing_emailed', { p_kind: kind, p_id: id, p_count: to.length }).catch(() => {});
+    setTimeout(() => { m.close(); done && done(); }, 400);
+  };
 }
 
 export async function render(main, params) {
@@ -58,6 +93,10 @@ export async function render(main, params) {
     <div id="mk"></div>`;
   const box = main.querySelector('#mk');
   const again = () => render(main, [tab]);
+  if (tab === 'campaigns' && !mgr) {
+    try { localStorage.setItem('cg-marketing-seen', new Date().toISOString()); } catch (e) { /* private mode */ }
+    import('../app.js').then(m => m.refreshCounts()).catch(() => {});
+  }
   if (tab === 'campaigns') return campaigns(box, mgr, again);
   if (tab === 'request') return requestForm(box);
   if (tab === 'requests') return requests(box, mgr, again);
@@ -84,7 +123,7 @@ async function campaigns(box, mgr, again) {
       </div></article>`;
   box.innerHTML = html`
     ${mgr ? html`<div class="btn-row" style="margin-bottom:1rem"><button class="btn primary" data-new>+ Add a campaign or promotion</button>
-      <span class="muted">Every franchise store is emailed as soon as you save it.</span></div>` : ''}
+      <span class="muted">When you save it, the app emails every franchise store (or opens your email ready to send).</span></div>` : ''}
     ${upcoming.length ? upcoming.map(card) : html`<div class="empty">No campaigns or promotions coming up yet.</div>`}
     ${past.length ? html`<details class="past"><summary>Past campaigns (${past.length})</summary>${past.map(card)}</details>` : ''}`;
   hydrate(box);
@@ -93,9 +132,11 @@ async function campaigns(box, mgr, again) {
   box.querySelector('[data-new]').onclick = () => editCampaign({ kind: 'campaign', title: '', details: '' }, again);
   box.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editCampaign(rows.find(r => r.id === b.closest('[data-id]').dataset.id), again));
   box.querySelectorAll('[data-send]').forEach(b => b.onclick = () => busy(b, async () => {
-    const res = await sendEmail('campaign', b.closest('[data-id]').dataset.id);
-    toast(res.msg, res.ok ? 'ok' : 'bad');
-    if (res.ok) again();
+    const id = b.closest('[data-id]').dataset.id;
+    const res = await sendEmail('campaign', id);
+    if (res.ok) { toast(res.msg, 'ok'); return again(); }
+    if (res.manual) return emailByHand('campaign', id, again).catch(fail);
+    toast(res.msg, 'bad');
   }));
 }
 
@@ -132,7 +173,9 @@ function editCampaign(c, done) {
         m.close();
         if (isNew) {
           const res = await sendEmail('campaign', id);
-          toast(res.ok ? 'Saved. ' + res.msg : 'Saved, but ' + res.msg.charAt(0).toLowerCase() + res.msg.slice(1), res.ok ? 'ok' : 'bad');
+          if (res.ok) toast('Saved. ' + res.msg, 'ok');
+          else if (res.manual) { toast('Saved.', 'ok'); done(); return emailByHand('campaign', id, done).catch(fail); }
+          else toast('Saved, but ' + res.msg.charAt(0).toLowerCase() + res.msg.slice(1), 'bad');
         } else toast('Saved.', 'ok');
         done();
       } catch (e) { fail(e); }
@@ -177,6 +220,7 @@ async function requestForm(box) {
       try {
         const r = await rpc('place_marketing_request', { p });
         const res = await sendEmail('request', r.id);
+        if (!res.ok && res.manual) emailByHand('request', r.id).catch(fail);
         box.innerHTML = html`<div class="card" style="max-width:720px"><div class="notice ok"><b>Request ${r.ref} sent.</b>
           ${res.ok ? ' The marketing team has been emailed and will get back to you.' : ' It is saved and the marketing team can see it in the app.'}</div>
           <div class="btn-row"><a class="btn" href="#/marketing/requests">See my requests</a><a class="btn" href="#/marketing/campaigns">Back to campaigns</a></div></div>`;
@@ -220,7 +264,12 @@ function showRequest(r, mgr, done) {
     });
   };
   const s = form.querySelector('[data-send]');
-  if (s) s.onclick = () => busy(s, async () => { const res = await sendEmail('request', r.id); toast(res.msg, res.ok ? 'ok' : 'bad'); });
+  if (s) s.onclick = () => busy(s, async () => {
+    const res = await sendEmail('request', r.id);
+    if (res.ok) return toast(res.msg, 'ok');
+    if (res.manual) return emailByHand('request', r.id).catch(fail);
+    toast(res.msg, 'bad');
+  });
 }
 
 // ------------------------------------------------------------------ gallery

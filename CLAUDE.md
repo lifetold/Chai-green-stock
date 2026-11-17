@@ -23,7 +23,7 @@ See README.md for features and setup, and docs/PROJECT-HISTORY.md for everything
 - Stores side (31 Oct 2026): daily/monthly safety checks with server-timed "rushed"
   flags, EHO read-only records, head-office overview, recipes, allergen chart, manual
   (supabase/seed-stores.sql has the starter content).
-- SAMPLE DATA (31 Oct 2026): 7 test logins (test-*@example.com, roles manager/staff/
+- SAMPLE DATA (31 Oct 2026): 7 test logins (test-*@example.com; the Sheffield two were renamed test-franchise-manager and test-franchise-staff on 17 Nov for franchisee testing, roles manager/staff/
   store_manager/store/inspector; password given to the user in chat, not stored here), 3 staff
   per store (PIN 1234), 14 days of check runs, 4 POs, 2 goods-ins, 24 dispatches/invoices,
   4 write-offs, a submitted weekly stock check. Every sample row id is in `sample.rows`; stock

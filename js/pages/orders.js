@@ -41,7 +41,7 @@ export async function render(main, params) {
 // ------------------------------------------------------------------ list
 async function list(main) {
   const store = isStoreRole();
-  let query = sb.from('store_orders').select('*, stores(name, code), store_order_lines(count)')
+  let query = sb.from('store_orders').select('*, stores:stores_public(name, code), store_order_lines(count)')
     .order('created_at', { ascending: false }).limit(200);
   const filter = sessionStorage.getItem('cg-orders-filter') || 'open';
   if (!store && filter === 'open') query = query.in('status', ['submitted', 'picking']);
@@ -71,7 +71,7 @@ async function list(main) {
 async function newOrder(main) {
   if (!canOrder()) { main.innerHTML = '<div class="notice bad">Only shops and head office can place shop orders.</div>'; return; }
   const [stores, items] = await Promise.all([
-    q(sb.from('stores').select('id, name, code').eq('active', true).order('name')),
+    q(sb.from('stores_public').select('id, name, code').eq('active', true).order('name')),
     rpc('order_catalogue')
   ]);
   const prices = await myPrices();
@@ -164,7 +164,7 @@ async function newOrder(main) {
 // ------------------------------------------------------------------ one order
 async function detail(main, id) {
   const [o, lines] = await Promise.all([
-    q(sb.from('store_orders').select('*, stores(name, code, type, address)').eq('id', id).single()),
+    q(sb.from('store_orders').select('*, stores:stores_public(name, code, type, address)').eq('id', id).single()),
     rpc('store_order_items', { p_order: id })
   ]);
   const prices = isStoreRole() ? await myPrices() : null;

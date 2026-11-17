@@ -5,7 +5,7 @@ import { myStoreId, storeSelect, bindStoreSelect } from './store-common.js';
 export async function render(main) {
   const canManage = isManager() || state.profile.role === 'store_manager';
   if (!canManage) { main.innerHTML = '<div class="notice bad">Managers only.</div>'; return; }
-  const stores = await q(sb.from('stores').select('id, name, code').eq('active', true).order('name'));
+  const stores = await q(sb.from('stores_public').select('id, name, code').eq('active', true).order('name'));
   if (!stores.length) { main.innerHTML = html`<div class="notice warn">Add a store first.</div>`; return; }
   const storeId = myStoreId(stores);
   const store = stores.find(s => s.id === storeId);

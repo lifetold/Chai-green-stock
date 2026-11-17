@@ -7,7 +7,7 @@ export async function render(main) {
   const since = addDays(new Date(), -13); since.setHours(0, 0, 0, 0);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const [stores, templates, runs, audits] = await Promise.all([
-    q(sb.from('stores').select('id, name, code').eq('active', true).order('name')),
+    q(sb.from('stores_public').select('id, name, code').eq('active', true).order('name')),
     q(sb.from('check_templates').select('*').eq('active', true).order('sort_order')),
     q(sb.from('check_runs').select('id, store_id, template_id, template_name, done_by, started_at, finished_at, score, failed, critical_failed, rushed, status')
       .eq('status', 'complete').gte('started_at', since.toISOString()).order('started_at', { ascending: false })),

@@ -38,6 +38,9 @@ See README.md for features and setup, and docs/PROJECT-HISTORY.md for everything
 - Franchise prices (17 Nov 2026): franchise store_manager logins see our selling price to their store in Order
   stock (RPC store_price_list, no cost) and their own invoices on #/my-invoices (RLS "franchise manager own invoices",
   helper franchise_prices_visible()). Company stores, shop tablets and inspectors see no prices.
+- Margins hidden (17 Nov 2026): store logins and inspectors cannot read `settings` or `stores` (policies now
+  is_staff()); they use RPC company_details() and view stores_public (no margin_pct). Store-facing pages query
+  stores_public; head-office pages still read stores.
 - Shop orders (9 Nov 2026): store_orders/store_order_lines, RPCs place_store_order,
   order_catalogue, store_order_items, start_picking_store_order, mark_store_order_sent,
   cancel_store_order, open_store_orders; page js/pages/orders.js; Stock out takes

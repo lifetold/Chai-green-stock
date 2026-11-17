@@ -1790,3 +1790,32 @@ revoke execute on function public.franchise_prices_visible() from public, anon;
 revoke execute on function public.store_price_list() from public, anon;
 grant execute on function public.franchise_prices_visible() to authenticated;
 grant execute on function public.store_price_list() to authenticated;
+
+-- ======================================================================
+-- HIDE MARGINS FROM STORE LOGINS (17 Nov 2026)
+-- Store accounts and inspectors no longer read the settings row or the
+-- stores table (both hold margins). They get safe copies instead:
+-- company_details() for printouts and the stores_public view.
+-- ======================================================================
+alter policy "active read settings" on public.settings using (public.is_staff());
+alter policy "store sees own store" on public.stores using (public.is_staff());
+
+create or replace function public.company_details() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('company_name', company_name, 'company_address', company_address,
+    'company_email', company_email, 'company_phone', company_phone, 'vat_number', vat_number,
+    'company_number', company_number, 'bank_details', bank_details,
+    'payment_terms_days', payment_terms_days, 'marketing_email', marketing_email)
+  from public.settings where id = 1 and public.is_active_user()
+$$;
+
+-- Runs as its owner, so it filters rows itself. No margin column.
+create or replace view public.stores_public as
+  select id, name, code, type, contact_name, email, phone, address, active, created_at
+  from public.stores
+  where public.is_staff() or public.can_view_store(id);
+
+revoke all on public.stores_public from anon;
+grant select on public.stores_public to authenticated;
+revoke execute on function public.company_details() from public, anon;
+grant execute on function public.company_details() to authenticated;

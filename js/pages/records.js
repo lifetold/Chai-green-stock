@@ -5,7 +5,7 @@ import { myStoreId, storeSelect, bindStoreSelect, isInspector } from './store-co
 
 export async function render(main, params) {
   if (params[0]) return detail(main, params[0]);
-  const stores = await q(sb.from('stores').select('id, name, code, address').eq('active', true).order('name'));
+  const stores = await q(sb.from('stores_public').select('id, name, code, address').eq('active', true).order('name'));
   if (!stores.length) { main.innerHTML = html`<div class="notice warn">No stores set up yet.</div>`; return; }
   const storeId = myStoreId(stores);
   const store = stores.find(s => s.id === storeId);
@@ -90,7 +90,7 @@ function answersTable(answers, runById, tab) {
 
 async function detail(main, id) {
   const [r, answers] = await Promise.all([
-    q(sb.from('check_runs').select('*, stores(name)').eq('id', id).single()),
+    q(sb.from('check_runs').select('*, stores:stores_public(name)').eq('id', id).single()),
     q(sb.from('check_answers').select('*').eq('run_id', id).order('sort_order'))
   ]);
   let section = null;

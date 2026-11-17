@@ -30,7 +30,10 @@ function cleanError(msg) {
 }
 
 export async function loadSettings() {
-  state.settings = await q(sb.from('settings').select('*').eq('id', 1).single());
+  // Store logins and inspectors only get the company details (no margins).
+  state.settings = ['admin', 'manager', 'staff'].includes(state.profile?.role)
+    ? await q(sb.from('settings').select('*').eq('id', 1).single())
+    : (await q(sb.rpc('company_details'))) || {};
   return state.settings;
 }
 

@@ -5,7 +5,7 @@ import { myStoreId, storeSelect, bindStoreSelect } from './store-common.js';
 
 export async function render(main, params) {
   if (params[0] === 'run') return runner(main, params[1], params[2]);
-  const stores = await q(sb.from('stores').select('id, name, code').eq('active', true).order('name'));
+  const stores = await q(sb.from('stores_public').select('id, name, code').eq('active', true).order('name'));
   if (!stores.length) { main.innerHTML = html`<div class="notice warn">No stores set up yet.</div>`; return; }
   const storeId = myStoreId(stores);
   const store = stores.find(s => s.id === storeId);
@@ -44,7 +44,7 @@ async function runner(main, templateId, storeId) {
   const [t, items, store, team] = await Promise.all([
     q(sb.from('check_templates').select('*').eq('id', templateId).single()),
     q(sb.from('check_items').select('*').eq('template_id', templateId).eq('active', true).order('sort_order')),
-    q(sb.from('stores').select('id, name').eq('id', storeId).single()),
+    q(sb.from('stores_public').select('id, name').eq('id', storeId).single()),
     q(sb.from('staff_members').select('id, name, role_title').eq('store_id', storeId).eq('active', true).order('name'))
   ]);
   const canSignAsMe = ['admin', 'manager', 'store_manager'].includes(state.profile.role);

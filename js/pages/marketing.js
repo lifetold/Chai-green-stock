@@ -196,9 +196,9 @@ function editCampaign(c, done) {
 async function requestForm(box) {
   const mgr = isManager();
   const myStore = state.profile.store_id
-    ? await q(sb.from('stores').select('id,name,contact_name,phone,email').eq('id', state.profile.store_id).maybeSingle()).catch(() => null)
+    ? await q(sb.from('stores_public').select('id,name,contact_name,phone,email').eq('id', state.profile.store_id).maybeSingle()).catch(() => null)
     : null;
-  const stores = mgr ? await q(sb.from('stores').select('id,name').eq('active', true).order('name')) : [];
+  const stores = mgr ? await q(sb.from('stores_public').select('id,name').eq('active', true).order('name')) : [];
   const min = new Date().toISOString().slice(0, 10);
   box.innerHTML = html`<form class="card" id="mr" style="max-width:720px">
     <p>Tell the marketing team what you need. They'll get your request by email and reply to you.</p>
@@ -231,7 +231,7 @@ async function requestForm(box) {
 
 // ------------------------------------------------------------------ requests list
 async function requests(box, mgr, again) {
-  const rows = await q(sb.from('marketing_requests').select('*, stores(name)').order('created_at', { ascending: false }));
+  const rows = await q(sb.from('marketing_requests').select('*, stores:stores_public(name)').order('created_at', { ascending: false }));
   box.innerHTML = rows.length ? html`<div class="table-wrap"><table><thead><tr><th>Ref</th><th>Store</th><th>From</th><th>Wanted by</th><th>What for</th><th>Status</th></tr></thead>
     <tbody>${rows.map(r => html`<tr data-id="${r.id}" class="clickable"><td>${r.ref}</td><td>${r.stores?.name || 'Head office'}</td>
       <td>${r.franchisee_name}</td><td>${date(r.wanted_by)}</td><td>${r.what_for.length > 60 ? r.what_for.slice(0, 60) + '…' : r.what_for}</td>

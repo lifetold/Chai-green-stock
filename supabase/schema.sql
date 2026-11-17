@@ -1741,3 +1741,52 @@ grant execute on function public.mark_marketing_emailed(text, uuid, int) to auth
 grant execute on function public.open_marketing_requests() to authenticated;
 grant execute on function public.can_use_marketing() to authenticated;
 grant select, insert, update, delete on public.marketing_campaigns, public.marketing_requests, public.marketing_images to authenticated;
+
+-- ======================================================================
+-- FRANCHISE PRICES (17 Nov 2026)
+-- A franchise store manager sees what Chai Green charges their store (in
+-- Order stock) and their own invoices. Never our cost prices or margins.
+-- Company-owned stores and the shop tablet login see no prices.
+-- ======================================================================
+create or replace function public.franchise_prices_visible() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(public.my_role() = 'store_manager'
+    and exists (select 1 from public.stores where id = public.my_store() and type = 'franchise'), false)
+$$;
+
+-- Selling price to the caller's own store only (same rules as price_for, no cost).
+create or replace function public.store_price_list()
+returns table (product_id uuid, price numeric, vat_rate numeric)
+language sql stable security definer set search_path = public as $$
+  select p.id,
+         case
+           when st.margin_pct is not null then round(lc.landed * (1 + st.margin_pct / 100), 2)
+           when p.sell_price > 0 then p.sell_price
+           else round(lc.landed * (1 + coalesce(p.margin_pct, s.default_margin_pct) / 100), 2)
+         end,
+         coalesce(p.vat_rate, s.default_vat_rate)
+  from public.products p
+  cross join public.settings s
+  join public.stores st on st.id = public.my_store() and st.type = 'franchise'
+  left join public.suppliers lg on lg.id = p.stored_by
+  cross join lateral (select p.cost_price + case when p.stored_by is not null
+      then coalesce(p.logistics_cost, lg.logistics_cost_per_unit, 0) else 0 end as landed) lc
+  where s.id = 1 and p.active and public.franchise_prices_visible()
+$$;
+
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'invoices' and policyname = 'franchise manager own invoices') then
+    create policy "franchise manager own invoices" on public.invoices for select to authenticated
+      using (public.franchise_prices_visible() and store_id = public.my_store() and status <> 'void');
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'invoice_lines' and policyname = 'franchise manager own invoice lines') then
+    create policy "franchise manager own invoice lines" on public.invoice_lines for select to authenticated
+      using (public.franchise_prices_visible() and exists (select 1 from public.invoices i
+        where i.id = invoice_id and i.store_id = public.my_store() and i.status <> 'void'));
+  end if;
+end $$;
+
+revoke execute on function public.franchise_prices_visible() from public, anon;
+revoke execute on function public.store_price_list() from public, anon;
+grant execute on function public.franchise_prices_visible() to authenticated;
+grant execute on function public.store_price_list() to authenticated;

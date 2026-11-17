@@ -35,6 +35,9 @@ See README.md for features and setup, and docs/PROJECT-HISTORY.md for everything
   open_marketing_requests; page js/pages/marketing.js; emails via api/marketing-email.js (Resend, uses the
   user's JWT, no service role). Automatic sending would need RESEND_API_KEY + a verified domain, but the user has NO access to DNS or the Google account, so the app falls back to opening the user's own email (mailto, BCC) pre-filled. Requests go to
   settings.marketing_email (social@chaigreen1823.com). Local test: scratchpad e2e/ (14 checks pass).
+- Franchise prices (17 Nov 2026): franchise store_manager logins see our selling price to their store in Order
+  stock (RPC store_price_list, no cost) and their own invoices on #/my-invoices (RLS "franchise manager own invoices",
+  helper franchise_prices_visible()). Company stores, shop tablets and inspectors see no prices.
 - Shop orders (9 Nov 2026): store_orders/store_order_lines, RPCs place_store_order,
   order_catalogue, store_order_items, start_picking_store_order, mark_store_order_sent,
   cancel_store_order, open_store_orders; page js/pages/orders.js; Stock out takes

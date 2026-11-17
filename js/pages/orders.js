@@ -1,6 +1,6 @@
 // Shop orders: a store asks the warehouse for stock. The warehouse packs it
 // and books it out through Stock out, which raises the invoice.
-import { sb, q, rpc, state, html, raw, num, date, dateTime, badge, busy, fail, toast, modal, isManager, isoDate, addDays } from '../lib.js';
+import { sb, q, rpc, state, html, raw, num, money, date, dateTime, badge, busy, fail, toast, modal, isManager, isoDate, addDays } from '../lib.js';
 import { myStoreId, storeSelect, bindStoreSelect, isStoreRole } from './store-common.js';
 import { refreshCounts } from '../app.js';
 
@@ -13,6 +13,24 @@ const STATUS = {
 const statusBadge = s => badge(STATUS[s]?.[0] || s, STATUS[s]?.[1] || s);
 const isWarehouse = () => ['admin', 'manager', 'staff'].includes(state.profile.role);
 const canOrder = () => isStoreRole() || isManager();
+
+// Franchise store managers: the price Chai Green charges their store, by product id.
+async function myPrices() {
+  if (!state.franchise) return null;
+  const rows = await rpc('store_price_list').catch(() => []);
+  return Object.fromEntries(rows.map(r => [r.product_id, { price: Number(r.price), vat: Number(r.vat_rate) }]));
+}
+function sums(list, prices) {   // list: [{id, qty}]
+  let net = 0, vat = 0;
+  for (const { id, qty } of list) {
+    const p = prices[id];
+    if (!p || !(p.price > 0)) continue;
+    const n = Math.round(p.price * qty * 100) / 100;
+    net += n; vat += Math.round(n * p.vat) / 100;
+  }
+  return { net, vat, total: net + vat, missing: list.some(l => !(prices[l.id]?.price > 0)) };
+}
+const priceTag = (prices, id) => prices[id]?.price > 0 ? money(prices[id].price) : 'Price to follow';
 
 export async function render(main, params) {
   if (params[0] === 'new') return newOrder(main);
@@ -56,6 +74,7 @@ async function newOrder(main) {
     q(sb.from('stores').select('id, name, code').eq('active', true).order('name')),
     rpc('order_catalogue')
   ]);
+  const prices = await myPrices();
   if (!stores.length) { main.innerHTML = '<div class="notice warn">No shops set up yet.</div>'; return; }
   let storeId = myStoreId(stores);
   const qty = {};        // product id -> qty
@@ -82,7 +101,8 @@ async function newOrder(main) {
     $('[data-list]').innerHTML = shown.length ? html`${shown.map(i => html`<li class="${qty[i.id] ? 'picked' : ''}">
       <div class="info"><div class="name">${i.name}</div>
         <div class="sub">${[i.pack_size, i.unit !== 'each' ? 'per ' + i.unit : ''].filter(Boolean).join(' · ')}
-        ${i.in_stock ? '' : html` ${badge('reorder', 'Out at warehouse')}`}</div></div>
+        ${i.in_stock ? '' : html` ${badge('reorder', 'Out at warehouse')}`}</div>
+        ${prices ? html`<div class="sub"><b>${priceTag(prices, i.id)}</b> <small>+ VAT</small></div>` : ''}</div>
       <div class="stepper"><button type="button" data-dec="${i.id}" aria-label="One less">−</button>
         <input type="number" inputmode="numeric" min="0" step="1" value="${qty[i.id] || ''}" placeholder="0" data-qty="${i.id}" aria-label="Quantity">
         <button type="button" data-inc="${i.id}" aria-label="One more">+</button></div></li>`)}`
@@ -100,7 +120,8 @@ async function newOrder(main) {
     });
     const n = Object.keys(qty).length;
     $('[data-bar]').hidden = !n;
-    $('[data-count]').textContent = `${n} item${n === 1 ? '' : 's'} in this order`;
+    const tot = prices ? sums(Object.entries(qty).map(([id, q]) => ({ id, qty: q })), prices) : null;
+    $('[data-count]').textContent = `${n} item${n === 1 ? '' : 's'} in this order` + (tot ? ` · ${money(tot.total)} inc VAT` : '');
   }
   let t;
   $('[data-search]').oninput = e => { clearTimeout(t); t = setTimeout(() => { term = e.target.value.trim(); draw(); }, 200); };
@@ -111,8 +132,12 @@ async function newOrder(main) {
     const picked = items.filter(i => qty[i.id]);
     const m = modal('Check your order', html`
       <p class="muted">For <b>${stores.find(s => s.id === storeId)?.name}</b></p>
-      <div class="table-wrap"><table><tbody>${picked.map(i => html`<tr><td>${i.name}${i.pack_size ? html`<br><small>${i.pack_size}</small>` : ''}</td>
-        <td class="num"><b>${num(qty[i.id])}</b></td></tr>`)}</tbody></table></div>
+      <div class="table-wrap"><table>
+        ${prices ? html`<thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Price each</th><th class="num">Net</th></tr></thead>` : ''}
+        <tbody>${picked.map(i => html`<tr><td>${i.name}${i.pack_size ? html`<br><small>${i.pack_size}</small>` : ''}</td>
+        <td class="num"><b>${num(qty[i.id])}</b></td>
+        ${prices ? html`<td class="num">${priceTag(prices, i.id)}</td><td class="num">${prices[i.id]?.price > 0 ? money(prices[i.id].price * qty[i.id]) : ''}</td>` : ''}</tr>`)}</tbody>
+        ${prices ? totalsFoot(sums(picked.map(i => ({ id: i.id, qty: qty[i.id] })), prices)) : ''}</table></div>
       ${picked.some(i => !i.in_stock) ? html`<p class="notice warn">Some items are out at the warehouse. They'll send them when they come in.</p>` : ''}
       <form autocomplete="off">
         <div class="grid two"><label>Your name<input name="who" required value="${isStoreRole() && state.profile.role === 'store_manager' ? state.profile.full_name || '' : ''}"></label>
@@ -142,6 +167,7 @@ async function detail(main, id) {
     q(sb.from('store_orders').select('*, stores(name, code, type, address)').eq('id', id).single()),
     rpc('store_order_items', { p_order: id })
   ]);
+  const prices = isStoreRole() ? await myPrices() : null;
   const wh = isWarehouse();
   const open = ['submitted', 'picking'].includes(o.status);
   const canCancel = open && (wh || o.status === 'submitted');
@@ -159,10 +185,13 @@ async function detail(main, id) {
     ${o.status === 'sent' ? html`<div class="notice ok">Packed and sent ${dateTime(o.updated_at)}.</div>` : ''}
     ${!wh && o.status === 'picking' ? html`<div class="notice">The warehouse is packing this order. To change it, call them.</div>` : ''}
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Item</th><th class="num">Qty</th>${wh ? html`<th>Warehouse</th>` : ''}</tr></thead>
+      <thead><tr><th>Item</th><th class="num">Qty</th>${wh ? html`<th>Warehouse</th>` : ''}${prices ? html`<th class="num">Price each</th><th class="num">Net</th>` : ''}</tr></thead>
       <tbody>${lines.map(l => html`<tr><td>${l.name}${l.pack_size ? html`<br><small>${l.pack_size}</small>` : ''}</td>
         <td class="num"><b>${num(l.qty)}</b> <small>${l.unit}</small></td>
-        ${wh ? html`<td>${l.in_stock ? badge('ok', 'In stock') : badge('out', 'Out of stock')}</td>` : ''}</tr>`)}</tbody></table></div></div>`;
+        ${wh ? html`<td>${l.in_stock ? badge('ok', 'In stock') : badge('out', 'Out of stock')}</td>` : ''}
+        ${prices ? html`<td class="num">${priceTag(prices, l.product_id)}</td><td class="num">${prices[l.product_id]?.price > 0 ? money(prices[l.product_id].price * l.qty) : ''}</td>` : ''}</tr>`)}</tbody>
+      ${prices ? totalsFoot(sums(lines.map(l => ({ id: l.product_id, qty: Number(l.qty) })), prices)) : ''}</table></div>
+      ${prices ? html`<p class="muted">Prices are today's prices. Your invoice from Chai Green is the final amount${o.status === 'sent' ? ' – see My invoices' : ''}.</p>` : ''}</div>`;
   const pick = main.querySelector('[data-pick]');
   if (pick) pick.onclick = e => busy(e.target, async () => {
     try { await rpc('start_picking_store_order', { p_order: id }); toast('Marked as being packed', 'ok'); refreshCounts(); detail(main, id); } catch (err) { fail(err); }
@@ -190,4 +219,11 @@ export async function orderForDispatch(orderId) {
   ]);
   const prods = lines.length ? await q(sb.from('product_stock').select('*').in('id', lines.map(l => l.product_id))) : [];
   return { order: o, lines: lines.map(l => ({ product: prods.find(p => p.id === l.product_id), qty: Number(l.qty) })).filter(l => l.product) };
+}
+
+function totalsFoot(t, span = 3) {
+  return html`<tfoot>
+    <tr><td colspan="${span}">Subtotal</td><td class="num">${money(t.net)}</td></tr>
+    <tr><td colspan="${span}">VAT</td><td class="num">${money(t.vat)}</td></tr>
+    <tr><td colspan="${span}"><b>Total</b>${t.missing ? html` <small>(some prices to follow)</small>` : ''}</td><td class="num"><b>${money(t.total)}</b></td></tr></tfoot>`;
 }

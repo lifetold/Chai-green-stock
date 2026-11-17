@@ -27,7 +27,8 @@ const ROUTES = {
   'team':            () => import('./pages/team.js'),
   'check-setup':     () => import('./pages/check-setup.js'),
   'orders':          () => import('./pages/orders.js'),
-  'marketing':       () => import('./pages/marketing.js')
+  'marketing':       () => import('./pages/marketing.js'),
+  'my-invoices':     () => import('./pages/my-invoices.js')
 };
 
 const NAV = [
@@ -72,6 +73,7 @@ const STORE_NAV = [
   ['records', '🗂️', 'Safety records'],
   ['recipes', '🍰', 'Recipes & allergens'],
   ['manual', '📘', 'Operations manual'],
+  ['my-invoices', '🧾', 'My invoices', null, 'franchise'],
   ['team', '🧑‍🍳', 'Store team', null, 'store_manager'],
   ['Marketing'],
   ['marketing', '📣', 'Campaigns, requests & images', 'marketing']
@@ -191,6 +193,9 @@ async function start(user) {
     return;
   }
   await loadSettings().catch(fail);
+  // Franchise store managers see what we charge their store (never our costs).
+  state.franchise = state.profile.role === 'store_manager'
+    ? await q(sb.rpc('franchise_prices_visible')).catch(() => false) : false;
   renderShell();
   window.addEventListener('hashchange', route);
   route();
@@ -199,7 +204,7 @@ async function start(user) {
 // ------------------------------------------------------------------ shell
 function renderShell() {
   const role = state.profile.role;
-  const canSee = need => !need || (need === 'manager' ? isManager() : need === 'store_manager' ? role === 'store_manager' : isAdmin());
+  const canSee = need => !need || (need === 'manager' ? isManager() : need === 'store_manager' ? role === 'store_manager' : need === 'franchise' ? state.franchise : isAdmin());
   const nav = role === 'inspector' ? INSPECTOR_NAV : STORE_HOME[role] ? STORE_NAV : NAV;
   const home = STORE_HOME[role];
   app.innerHTML = html`
@@ -271,7 +276,7 @@ async function route() {
   document.body.classList.remove('nav-open');
   let [name, ...params] = location.hash.replace(/^#\/?/, '').split('/');
   const home = STORE_HOME[state.profile.role];
-  const STORE_PAGES = ['checks', 'orders', 'records', 'recipes', 'manual', 'team', 'marketing'];
+  const STORE_PAGES = ['checks', 'orders', 'records', 'recipes', 'manual', 'team', 'marketing', 'my-invoices'];
   if (home && !STORE_PAGES.includes(name.split('?')[0])) name = home;
   if (state.profile.role === 'inspector' && !['records', 'recipes'].includes(name.split('?')[0])) name = 'records';
   const key = name.split('?')[0];

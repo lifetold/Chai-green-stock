@@ -372,3 +372,11 @@ tr.clickable:hover td { background: #f6f7f5; }
 .campaign-text p { margin: .3rem 0; }
 .campaign-text ul, .campaign-text ol { margin: .3rem 0; padding-left: 1.3rem; }
 .campaign-text h3 { margin: .7rem 0 .2rem; font-size: 1rem; }
+
+/* Help */
+.help-section h2 { margin: 0 0 .5rem; font-size: 1.15rem; }
+.help-topic { border-top: 1px solid var(--line); padding: .55rem 0; }
+.help-topic:first-of-type { border-top: 0; }
+.help-topic summary { cursor: pointer; font-weight: 600; padding: .2rem 0; min-height: 32px; display: flex; align-items: center; }
+.help-topic ol { margin: .4rem 0 .2rem 1.2rem; padding: 0; }
+.help-topic li { margin: .3rem 0; line-height: 1.45; }

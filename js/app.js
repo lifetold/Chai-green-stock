@@ -28,7 +28,8 @@ const ROUTES = {
   'check-setup':     () => import('./pages/check-setup.js'),
   'orders':          () => import('./pages/orders.js'),
   'marketing':       () => import('./pages/marketing.js'),
-  'my-invoices':     () => import('./pages/my-invoices.js')
+  'my-invoices':     () => import('./pages/my-invoices.js'),
+  'help':            () => import('./pages/help.js')
 };
 
 const NAV = [
@@ -62,7 +63,9 @@ const NAV = [
   ['stores', '🏪', 'Stores'],
   ['suppliers', '🏭', 'Suppliers'],
   ['settings', '⚙️', 'Settings', null, 'manager'],
-  ['users', '👥', 'Users', 'users', 'admin']
+  ['users', '👥', 'Users', 'users', 'admin'],
+  ['Help'],
+  ['help', '❓', 'Help & guide']
 ];
 
 // What store accounts and Environmental Health Officers see instead.
@@ -76,13 +79,17 @@ const STORE_NAV = [
   ['my-invoices', '🧾', 'My invoices', null, 'franchise'],
   ['team', '🧑‍🍳', 'Store team', null, 'store_manager'],
   ['Marketing'],
-  ['marketing', '📣', 'Campaigns, requests & images', 'marketing']
+  ['marketing', '📣', 'Campaigns, requests & images', 'marketing'],
+  ['Help'],
+  ['help', '❓', 'Help & guide']
 ];
 const INSPECTOR_NAV = [
   ['Inspection'],
   ['records', '🗂️', 'Food safety records'],
   ['recipes/allergens', '⚠️', 'Allergen chart'],
-  ['recipes', '🍰', 'Recipes']
+  ['recipes', '🍰', 'Recipes'],
+  ['Help'],
+  ['help', '❓', 'Help & guide']
 ];
 const STORE_HOME = { store: 'checks', store_manager: 'checks', inspector: 'records' };
 
@@ -276,9 +283,9 @@ async function route() {
   document.body.classList.remove('nav-open');
   let [name, ...params] = location.hash.replace(/^#\/?/, '').split('/');
   const home = STORE_HOME[state.profile.role];
-  const STORE_PAGES = ['checks', 'orders', 'records', 'recipes', 'manual', 'team', 'marketing', 'my-invoices'];
+  const STORE_PAGES = ['checks', 'orders', 'records', 'recipes', 'manual', 'team', 'marketing', 'my-invoices', 'help'];
   if (home && !STORE_PAGES.includes(name.split('?')[0])) name = home;
-  if (state.profile.role === 'inspector' && !['records', 'recipes'].includes(name.split('?')[0])) name = 'records';
+  if (state.profile.role === 'inspector' && !['records', 'recipes', 'help'].includes(name.split('?')[0])) name = 'records';
   const key = name.split('?')[0];
   app.querySelectorAll('[data-route]').forEach(a => a.classList.toggle('active', a.dataset.route === key));
   const main = document.getElementById('main');
